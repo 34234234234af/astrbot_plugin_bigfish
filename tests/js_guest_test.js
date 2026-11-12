@@ -151,6 +151,48 @@ try {
   ok("上报流程不抛异常", false, e.message);
 }
 
+console.log("3.5) 本地预测：不等服务器回包，自己的鱼立刻动");
+try {
+  const p0 = sandbox.__bf && sandbox.__bf.pred;
+  ok("预测对象已建立", !!p0, p0);
+  ok("预测用的是自己的实体", !!(sandbox.__bf.state.ents || []).find((e) => e.p === "g2"));
+
+  if (p0) {
+    const x0 = p0.x, y0 = p0.y;
+    frames(30);            // 期间不推任何新状态，只跑本地预测
+    const p1 = sandbox.__bf.pred;
+    const moved = Math.hypot(p1.x - x0, p1.y - y0);
+    ok("无新状态时预测仍在推进（这就是手感）", moved > 20, { x0, y0, x1: p1.x, y1: p1.y, moved: +moved.toFixed(1) });
+
+    // 服务器给了一个偏差不大的权威位置 → 应该平滑纠偏，而不是瞬移
+    const meNow = sandbox.__bf.state.ents.find((e) => e.p === "g2");
+    const drift = { ...stateMsgAfterDrift(meNow) };
+    ws.push(drift);
+    const p2 = sandbox.__bf.pred;
+    const jump = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    ok("纠偏是渐进的（单帧不会瞬移）", jump < 120, +jump.toFixed(1));
+
+    // 偏差过大 → 直接对齐，避免永远追不上
+    const far = JSON.parse(JSON.stringify(drift));
+    const farMe = far.ents.find((e) => e.p === "g2");
+    farMe.x += 400;
+    farMe.tk = (far.tk || 1) + 1;
+    ws.push(far);
+    const p3 = sandbox.__bf.pred;
+    ok("偏差过大时直接对齐", Math.abs(p3.x - farMe.x) < 60, { pred: p3.x, server: farMe.x });
+  }
+} catch (e) {
+  ok("预测测试不抛异常", false, e.message);
+}
+
+function stateMsgAfterDrift(me) {
+  // 构造一条"服务器位置比预测略微落后"的状态
+  const ents = (sandbox.__bf.state.ents || []).map((e) =>
+    e.p === "g2" ? { ...e, x: e.x - 15, y: e.y } : { ...e }
+  );
+  return { t: "state", tk: (sandbox.__bf.state.tk || 1) + 1, tl: 40, w: 1600, h: 900, ents, sc: sandbox.__bf.state.sc };
+}
+
 console.log("4) 结算（游客只读）");
 ws.push({
   t: "end",

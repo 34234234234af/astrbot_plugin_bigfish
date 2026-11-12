@@ -127,7 +127,7 @@ const CFG = {
   INVULN: 2.0,
   SCORE_PER_EAT: 10,
   DURATION: 90,
-  BROADCAST_DT: 1/15,
+  BROADCAST_DT: 1/20,
 };
 const clamp = (v,a,b) => v<a?a:(v>b?b:v);
 const r1 = v => Math.round(v*10)/10;
@@ -419,10 +419,26 @@ function handle(d){
     case "start":
       enterGame();
       break;
-    case "state":
+    case "state": {
+      const keep = pred;
       remoteState = d; remoteTk = d.tk || 0;
       if(!playing && myRole !== "host" && d.ents) enterGame();
+      // 本地预测纠偏：把自己的鱼往权威位置轻轻拉过去（差太多就直接瞬移）
+      if(keep && myPid){
+        const me = (d.ents || []).find(e => e.p === myPid);
+        if(!me || !me.a){
+          pred = null;
+        } else {
+          const ex = me.x - keep.x, ey = me.y - keep.y;
+          if(Math.hypot(ex, ey) > 180){
+            keep.x = me.x; keep.y = me.y; keep.vx = 0; keep.vy = 0;
+          } else {
+            keep.x += ex * 0.3; keep.y += ey * 0.3;
+          }
+        }
+      }
       break;
+    }
     case "end":
       lastResult = d.result || null;
       showResult(lastResult);
@@ -483,6 +499,7 @@ function nameOf(pid){
 
 function enterGame(){
   playing = true;
+  pred = null;
   $("lobby").classList.add("hidden");
   $("result").classList.add("hidden");
   $("mePill").style.display = "";
@@ -530,6 +547,7 @@ function leaveRoom(){
 
   if(!isHost){ try{ send({t:"leave"}); }catch(e){} }
   playing = false;
+  pred = null;
   hostWorld = null;
   try{ if(ws && ws.readyState === 1) ws.close(); }catch(e){}
 
@@ -649,6 +667,31 @@ function myEnt(){
   return null;
 }
 
+/* 玩家（非房主）本地预测：自己的鱼立刻响应操作，不等服务器回包。
+   这是"操作手感"的关键 —— 否则从按下方向到看见鱼转向要等一个来回（150~300ms）。 */
+let pred = null;
+
+function updatePrediction(dt, dir){
+  if(myRole === "host" || !playing){ pred = null; return; }
+  if(!(dt > 0)) return;   // 防御：负/零 dt 不推进，避免速度爆炸
+  const st = remoteState;
+  if(!st || !st.ents){ pred = null; return; }
+  const me = st.ents.find(e => e.p === myPid);
+  if(!me || !me.a){ pred = null; return; }
+
+  if(!pred){ pred = {x: me.x, y: me.y, vx: 0, vy: 0, s: me.s}; }
+  pred.s += (me.s - pred.s) * Math.min(1, dt * 10);
+
+  const sp = maxSpeed(pred.s);
+  const tx = (dir.x || 0) * sp, ty = (dir.y || 0) * sp;
+  let dvx = tx - pred.vx, dvy = ty - pred.vy;
+  const dl = Math.hypot(dvx, dvy), maxdv = CFG.ACCEL * dt;
+  if(dl > maxdv && dl > 0){ dvx = dvx / dl * maxdv; dvy = dvy / dl * maxdv; }
+  pred.vx += dvx; pred.vy += dvy;
+  pred.x = clamp(pred.x + pred.vx * dt, pred.s, CFG.W - pred.s);
+  pred.y = clamp(pred.y + pred.vy * dt, pred.s, CFG.H - pred.s);
+}
+
 /* ============================ 渲染 ============================ */
 const cvx = cv.getContext("2d");
 const rent = new Map();     // 渲染用的实体表（房主和客户端共用）
@@ -693,7 +736,7 @@ function syncRender(dt){
       r.ang = Math.atan2(r.vy || 0.001, r.vx || 0.001);
       if(!r.vx && !r.vy) r.ang = r.ang || 0;
     } else {
-      const f = Math.min(1, dt * 16);
+      const f = Math.min(1, dt * 22);
       const ox = r.x, oy = r.y;
       r.px = ox; r.py = oy;
       r.x += ((e.x ?? r.x) - r.x) * f;
@@ -701,6 +744,13 @@ function syncRender(dt){
       r.s += ((e.s ?? r.s) - r.s) * f;
       if(Math.abs(r.x-ox) + Math.abs(r.y-oy) > 0.05){
         r.ang = Math.atan2(r.y-oy, r.x-ox);
+      }
+      // 自己的鱼用本地预测覆盖，操作立刻有反馈（不等服务器回包）
+      if(pred && e.a && e.p === myPid){
+        r.x = pred.x; r.y = pred.y; r.s = pred.s;
+        if(Math.abs(pred.vx) + Math.abs(pred.vy) > 5){
+          r.ang = Math.atan2(pred.vy, pred.vx);
+        }
       }
     }
     r.alive = e.a === undefined ? 1 : e.a;
@@ -854,7 +904,9 @@ function draw(now){
 let last = performance.now(), acc = 0, bcAcc = 0, lastInputSent = 0;
 
 function loop(now){
-  const dtRaw = Math.min(0.1, (now - last)/1000);
+  // 注意必须夹在 [0, 0.1]：首帧或系统时间回拨时 now-last 可能是负的，
+  // 负 dt 会让加速度反向累积，速度指数爆炸（曾导致自己的鱼瞬间飞出屏幕）。
+  const dtRaw = Math.max(0, Math.min(0.1, (now - last)/1000));
   last = now;
   syncRender(dtRaw);
 
@@ -890,6 +942,7 @@ function loop(now){
       lastInputSent = now;
       send({t:"input", dx: Math.round(dir.x*1000)/1000, dy: Math.round(dir.y*1000)/1000});
     }
+    updatePrediction(dtRaw, dir);   // 本地预测，自己的鱼立刻动
     updateHudFromState();
   }
 
@@ -981,6 +1034,16 @@ $("quitBtn").addEventListener("click", leaveRoom);
 resize();
 connect();
 requestAnimationFrame(loop);
+
+// 调试/测试用：在控制台里 __bf.state 看最近一次快照，__bf.pred 看本地预测
+try{
+  globalThis.__bf = {
+    get pred(){ return pred; },
+    get state(){ return remoteState; },
+    get role(){ return myRole; },
+    get pid(){ return myPid; },
+  };
+}catch(e){}
 })();
 </script>
 </body>
