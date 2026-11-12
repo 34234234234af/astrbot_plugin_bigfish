@@ -184,6 +184,35 @@ try {
   ok("处理输入/加入不抛异常", false, e.message);
 }
 
+console.log("3.5) 房主必须真的应用玩家输入（曾经漏了这个 case，bot 只会直线游）");
+try {
+  const lastState = () => ws.sent.filter((x) => x.t === "state").pop();
+  const entOf = (pid) => (lastState().ents || []).find((e) => e.p === pid);
+  const hold = (dx, dy, n) => {
+    for (let i = 0; i < n; i++) {
+      ws.push({ t: "input", pid: "g3", dx, dy });
+      frames(2);
+    }
+  };
+
+  // 鱼有惯性（加速上限 1500px/s²），先松手让它停下来，才能干净地测方向
+  hold(0, 0, 25);
+  const p0 = entOf("g3");
+  ok("能观察到 g3 的位置", !!p0);
+
+  hold(-1, 0, 30);           // ≈1 秒
+  const p1 = entOf("g3");
+  ok("g3 收到 dx=-1 后向左移动", !!p1 && p1.x < p0.x - 20,
+     { before: p0 && p0.x, after: p1 && p1.x });
+
+  hold(1, 0, 30);
+  const p2 = entOf("g3");
+  ok("g3 收到 dx=1 后向右移动", !!p2 && p2.x > p1.x + 20,
+     { after: p1 && p1.x, back: p2 && p2.x });
+} catch (e) {
+  ok("输入应用测试不抛异常", false, e.message);
+}
+
 console.log("4) 打完整局 → 结算");
 try {
   // dt 上限 0.1s，每帧最多推进 8 个 tick，用大跨度快进

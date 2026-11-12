@@ -506,14 +506,19 @@ class BigFishPlugin(Star):
             f"{self._room_link(code)}\n"
             f"规则：第一个打开链接的人当房主，游戏在这个房主的浏览器里运行，"
             f"{where}只做转发，所以不卡。\n"
-            f"房主点「开始游戏」开局，一局 {int(self.c('match_seconds', 90))} 秒。{bot_line}"
+            f"房主点「开始游戏」开局，一局 {int(self.c('match_seconds', 90))} 秒。{bot_line}\n"
+            f"⚠️ 在 QQ 里点开如果提示「在浏览器中打开」，点一下就行 —— "
+            f"QQ 内置浏览器撑不住实时联机，用系统浏览器才能玩。"
         )
 
     def _cmd_join(self, event: AstrMessageEvent) -> str:
         code = self._find_room_of(event.unified_msg_origin)
         if not code:
             return f"这个会话还没有房间，先发 {self._usage('open')}。"
-        return f"房间 {code}：\n{self._room_link(code)}"
+        return (
+            f"房间 {code}：\n{self._room_link(code)}\n"
+            f"（QQ 里打不开的话，点右上角 ⋯ → 在浏览器中打开）"
+        )
 
     async def _cmd_status(self, event: AstrMessageEvent) -> str:
         code = self._find_room_of(event.unified_msg_origin)

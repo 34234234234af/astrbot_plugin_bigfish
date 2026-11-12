@@ -73,7 +73,10 @@
 <canvas id="cv"></canvas>
 
 <div class="hud" id="topbar">
-  <div class="pill" id="timerPill"><span id="timer">--</span></div>
+  <div style="display:flex;gap:8px;align-items:center">
+    <div class="pill" id="timerPill"><span id="timer">--</span></div>
+    <button id="quitBtn" class="pill" style="display:none;pointer-events:auto;cursor:pointer;background:rgba(255,122,89,.22);border-color:rgba(255,122,89,.5);color:#ffb59f">退出</button>
+  </div>
   <div class="pill" id="mePill" style="display:none">我：<b id="meScore">0</b> 分 · 体型 <b id="meSize">20</b></div>
 </div>
 <div class="hud" id="board"><div class="t">排行榜</div><div id="boardRows"></div></div>
@@ -87,7 +90,7 @@
     <input id="nameInput" maxlength="12" placeholder="给自己起个鱼名">
     <div class="roster" id="roster"></div>
     <button id="startBtn" style="display:none">开始游戏</button>
-    <button id="reloadBtn" class="ghost" style="display:none">重新连接</button>
+    <button id="reloadBtn" class="ghost" style="display:none">重新进入</button>
   </div>
 </div>
 
@@ -97,7 +100,8 @@
     <p class="sub" id="resultSub"></p>
     <div class="rows" id="resultRows"></div>
     <button id="againBtn" style="display:none">再来一局</button>
-    <button id="closeBtn" class="ghost" style="display:none">退出</button>
+    <p class="sub" id="waitHint" style="display:none;text-align:center;margin-top:14px">等房主开下一局…</p>
+    <button id="closeBtn" class="ghost">退出房间</button>
   </div>
 </div>
 
@@ -400,6 +404,18 @@ function handle(d){
     case "peer_leave":
       if(myRole === "host" && hostWorld) hostWorld.removePlayer(d.pid);
       break;
+    // ★ 玩家（含 bot）的方向指令 —— 之前漏了这个 case，导致所有人的输入被丢弃
+    case "input":
+      if(myRole === "host" && hostWorld && d.pid){
+        hostWorld.setInput(d.pid, Number(d.dx) || 0, Number(d.dy) || 0);
+      }
+      break;
+    case "leave":
+      if(myRole === "host" && hostWorld && d.pid){
+        hostWorld.removePlayer(d.pid);
+        toast(`${d.name || "有人"} 退出了`);
+      }
+      break;
     case "start":
       enterGame();
       break;
@@ -470,6 +486,7 @@ function enterGame(){
   $("lobby").classList.add("hidden");
   $("result").classList.add("hidden");
   $("mePill").style.display = "";
+  $("quitBtn").style.display = "";
   $("hint").style.display = "";
 }
 
@@ -494,8 +511,42 @@ function showResult(res){
   });
   $("result").classList.remove("hidden");
   $("againBtn").style.display = myRole === "host" ? "" : "none";
+  $("waitHint").style.display = myRole === "host" ? "none" : "";
+  $("closeBtn").style.display = "";
+  $("quitBtn").style.display = "none";
   $("startBtn").style.display = myRole === "host" ? "" : "none";
   if(playing) $("lobby").classList.add("hidden");
+}
+
+/* 退出房间：告诉房主我走了，断开连接，回到大厅 */
+function leaveRoom(){
+  const isHost = myRole === "host";
+  const msg = isHost
+    ? "你是房主，退出会直接解散这个房间，确定吗？"
+    : "确定退出这个房间吗？";
+  try{
+    if(typeof confirm === "function" && !confirm(msg)) return;
+  }catch(e){}
+
+  if(!isHost){ try{ send({t:"leave"}); }catch(e){} }
+  playing = false;
+  hostWorld = null;
+  try{ if(ws && ws.readyState === 1) ws.close(); }catch(e){}
+
+  $("result").classList.add("hidden");
+  $("lobby").classList.remove("hidden");
+  $("mePill").style.display = "none";
+  $("quitBtn").style.display = "none";
+  $("hint").style.display = "none";
+  $("startBtn").style.display = "none";
+  $("waitHint").style.display = "none";
+  $("timer").textContent = "--";
+  $("lobbySub").textContent = isHost
+    ? "你已解散房间。"
+    : "你已退出房间。";
+  $("reloadBtn").textContent = "重新进入";
+  $("reloadBtn").style.display = "";
+  $("closeBtn").style.display = "none";
 }
 
 /* ============================ 输入 ============================ */
@@ -924,7 +975,8 @@ $("againBtn").addEventListener("click", () => {
   startMatch();
 });
 $("reloadBtn").addEventListener("click", () => { location.reload(); });
-$("closeBtn").addEventListener("click", () => { location.href = "about:blank"; });
+$("closeBtn").addEventListener("click", leaveRoom);
+$("quitBtn").addEventListener("click", leaveRoom);
 
 resize();
 connect();

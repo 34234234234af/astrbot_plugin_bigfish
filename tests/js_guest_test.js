@@ -166,6 +166,16 @@ ws.push({
 ok("结算面板渲染 2 行", el("resultRows")._kids.length === 2, el("resultRows")._kids.length);
 ok("我赢了的标题", el("resultTitle").textContent.includes("赢了"), el("resultTitle").textContent);
 ok("游客没有再来一局按钮", el("againBtn").style.display === "none", el("againBtn").style.display);
+ok("游客看到「等房主」提示", el("waitHint").style.display !== "none");
+ok("结算页有退出按钮", el("closeBtn").style.display !== "none", el("closeBtn").style.display);
+
+console.log("4.5) 点「退出房间」");
+ws.sent.length = 0;
+el("closeBtn")._handlers.click[0]();
+ok("回到了大厅界面", !el("lobby").classList.contains("hidden"));
+ok("提示已退出", el("lobbySub").textContent.includes("退出"), el("lobbySub").textContent);
+ok("有「重新进入」按钮", el("reloadBtn").style.display !== "none");
+ok("退出时通知了房主", ws.sent.some((x) => x.t === "leave"), ws.sent.map((x) => x.t));
 
 console.log("5) 房主解散");
 ws.push({ t: "room_closed", msg: "房主解散了房间" });
