@@ -46,6 +46,7 @@ class BotPlayer:
         self._last_input = 0.0
         self._session = None
         self._connected = False
+        self._fatal = False
 
     # ------------------------------------------------------------------
     @property
@@ -77,25 +78,37 @@ class BotPlayer:
 
     # ------------------------------------------------------------------
     async def _run(self) -> None:
+        """连上房间并待着；掉线就重连，直到房间真的没了（_fatal）或被主动停止。
+
+        之前的实现连上过一次就 return，导致网络抖一下、房主刷新一下，
+        bot 就从房间里永久消失（群里看到的现象就是"bot 不见了"）。
+        """
         if aiohttp is None:
             logger.error("[bigfish] 缺少 aiohttp，bot 无法进房")
             return
-        backoff = 1.5
-        for attempt in range(4):
-            if self._stop:
-                return
+
+        backoff = 1.0
+        while not self._stop:
+            connected_before = self._connected
             try:
                 await self._once()
-                if self._stop or self._connected:
-                    return
             except asyncio.CancelledError:
                 raise
             except Exception as e:
                 if self._stop:
                     return
-                logger.warning(f"[bigfish] bot 连接房间失败({attempt + 1}/4): {e}")
+                logger.warning(f"[bigfish] bot 连接房间失败: {e}")
+
+            if self._stop or self._fatal:
+                return
+
+            # 成功连上过（拿到过 welcome）→ 重置退避，说明是中途掉线
+            if connected_before:
+                backoff = 1.0
+                self._connected = False
+                logger.info(f"[bigfish] bot 与房间 {self.room} 的连接断了，准备重连")
             await asyncio.sleep(backoff)
-            backoff = min(backoff * 1.8, 20.0)
+            backoff = min(backoff * 1.6, 15.0)
 
     async def _once(self) -> None:
         async with aiohttp.ClientSession() as session:
@@ -168,6 +181,8 @@ class BotPlayer:
         elif t == "error":
             logger.warning(f"[bigfish] bot 收到错误: {data.get('msg')}")
             if data.get("fatal"):
+                # 房间真的没了（被关闭 / 不存在），重连也没意义
+                self._fatal = True
                 self._stop = True
                 if self.on_close:
                     try:

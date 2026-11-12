@@ -35,6 +35,9 @@ jobs:
       - name: 中继 + bot 端到端
         run: python tests/e2e_test.py
 
+      - name: bot 掉线重连
+        run: python tests/bot_reconnect_test.py
+
       - name: 外部中继模式端到端
         run: python tests/external_relay_test.py
 

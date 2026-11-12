@@ -588,9 +588,15 @@ class BigFishPlugin(Star):
             skill,
             max_players=max_players,
             on_end=lambda result: self._on_room_end(code, result),
+            on_close=lambda msg: self._on_bot_gone(code, msg),
         )
         self.bots[code] = player
         player.start()
+
+    async def _on_bot_gone(self, code: str, msg: str) -> None:
+        """bot 彻底离开房间（房间被关 / 连不上），这里只做记录。"""
+        logger.warning(f"[bigfish] bot 已离开房间 {code}：{msg}")
+        self.bots.pop(code, None)
 
     async def _stop_bot(self, code: str) -> None:
         bot = self.bots.pop(code, None)

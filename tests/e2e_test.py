@@ -85,6 +85,8 @@ async def main() -> int:
             await ws.send_str(json.dumps({"t": "start"}))
             inputs = 0
 
+            rosters: list[list] = []
+
             async def pump():
                 nonlocal inputs
                 async for m in ws:
@@ -94,8 +96,25 @@ async def main() -> int:
                     if d.get("t") == "input":
                         inputs += 1
                         world.set_input(d["pid"], d.get("dx", 0), d.get("dy", 0))
+                    elif d.get("t") == "roster":
+                        rosters.append(d.get("roster") or [])
 
             reader = asyncio.create_task(pump())
+
+            # ---- 群友进房：房主必须收到名单更新 ----
+            # （少了这个，房主在大厅看不到新来的人，开局也拉不上他）
+            guest_url = (
+                f"http://127.0.0.1:{PORT}/ws?room={ROOM}&name=%E9%98%BF%E5%BC%BA&role=auto"
+            )
+            async with session.ws_connect(guest_url) as guest:
+                gw = json.loads((await guest.receive()).data)
+                assert gw["t"] == "welcome" and gw["role"] == "guest", gw
+                await asyncio.sleep(0.4)
+                assert any(any(r.get("name") == "阿强" for r in ros) for ros in rosters), (
+                    f"房主没收到含新玩家的名单更新: {rosters}"
+                )
+                print(f"[ok] 房主收到名单更新，能看到「阿强」共 {len(rosters)} 次推送")
+            await asyncio.sleep(0.3)
 
             # 房主用固定方向游（模拟一个菜鸟玩家）
             fixed = {"x": 0.3, "y": 0.2}

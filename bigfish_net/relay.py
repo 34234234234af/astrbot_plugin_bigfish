@@ -167,11 +167,25 @@ class Relay:
             except Exception:
                 pass
 
-    async def broadcast(self, room: Room, payload: dict, exclude: str = "") -> None:
-        for p in list(room.peers.values()):
+    async def broadcast(
+        self, room: Room, payload: dict, exclude: str = "", include_host: bool = False
+    ) -> None:
+        """给房间里的玩家发消息。
+
+        注意：房主存在 room.host，不在 room.peers 里。需要发给房主时必须
+        显式传 include_host=True —— 名单（roster）更新就属于这种情况。
+        """
+        targets = list(room.peers.values())
+        if include_host and room.host is not None:
+            targets.append(room.host)
+        for p in targets:
             if p.pid == exclude:
                 continue
             await self._send(p.ws, payload)
+
+    async def send_roster(self, room: Room) -> None:
+        """名单变了：房主和所有玩家都要收到，否则房主看不到谁进来了。"""
+        await self.broadcast(room, {"t": "roster", "roster": room.roster()}, include_host=True)
 
     async def _send(self, ws, payload: dict) -> None:
         try:
@@ -296,8 +310,10 @@ class Relay:
                 room.host.ws,
                 {"t": "peer_join", "pid": peer.pid, "name": peer.name, "role": peer.role},
             )
-            # 把房主名单同步给其他人
-            await self.broadcast(room, {"t": "roster", "roster": room.roster()})
+        # 名单同步（含房主自己）—— 少了这个，房主在大厅里看不到新进来的人，
+        # 开局时也拉不上他（房主是按自己的 roster 建世界的）
+        if role != "host":
+            await self.send_roster(room)
 
         try:
             async for msg in ws:
@@ -369,7 +385,7 @@ class Relay:
             await self._send(
                 room.host.ws, {"t": "peer_leave", "pid": peer.pid, "name": peer.name}
             )
-            await self.broadcast(room, {"t": "roster", "roster": room.roster()})
+        await self.send_roster(room)
 
     # ------------------------------------------------------------ 维护
     async def sweep(self, ttl: float = 3600.0) -> None:
