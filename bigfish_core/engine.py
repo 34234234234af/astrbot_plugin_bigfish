@@ -32,6 +32,12 @@ RESPAWN_DELAY = 2.5
 RESPAWN_INVULN = 2.0
 SCORE_PER_EAT = 10
 
+# —— NPC 生态平衡（与 web/index.html 的 CFG 保持一致）——
+NPC_MAX_BIG = 2        # 场上"能吃掉玩家"的大鱼最多留几条
+NPC_SPEED = 0.85       # NPC 速度系数：比玩家慢，才追得上/逃得掉
+NPC_CHASE_R = 240.0    # NPC 主动捕食半径（原来 360，太凶）
+NPC_FLEE_R = 320.0     # NPC 逃跑半径
+
 
 def clamp(v: float, lo: float, hi: float) -> float:
     return lo if v < lo else (hi if v > hi else v)
@@ -125,18 +131,32 @@ class Sim:
         base = max((e.size for e in players), default=PLAYER_START)
         # 大部分是小鱼，偶尔刷出一条比玩家大的，制造压力
         roll = self.rng.random()
-        if roll < 0.10:
-            size = base * self.rng.uniform(1.05, 1.6)
-        elif roll < 0.52:
-            size = base * self.rng.uniform(0.35, 0.9)
-        else:
-            size = base * self.rng.uniform(0.12, 0.35)
+        big = False
+        if roll < 0.04:                      # 只有 4% 刷出比玩家大的（原来 10%）
+            size = base * self.rng.uniform(1.05, 1.30)
+            big = True
+        elif roll < 0.30:                    # 26% 中等
+            size = base * self.rng.uniform(0.45, 0.95)
+        else:                                # 70% 小鱼（原来 48%）
+            size = base * self.rng.uniform(0.10, 0.40)
         size = clamp(size, NPC_MIN, MAX_SIZE)
 
-        for _ in range(12):  # 尽量别刷在玩家脸上
+        # 场上大鱼够多了就降级，别把玩家围死
+        if big:
+            threats = sum(
+                1
+                for e in self.entities
+                if e.kind == "npc" and e.alive and e.size >= base * EAT_RATIO
+            )
+            if threats >= NPC_MAX_BIG:
+                size = clamp(base * self.rng.uniform(0.15, 0.45), NPC_MIN, MAX_SIZE)
+                big = False
+
+        safe_dist = 420.0 if big else 220.0
+        for _ in range(16):  # 尽量别刷在玩家脸上（大鱼更远）
             x = self.rng.uniform(40, WORLD_W - 40)
             y = self.rng.uniform(40, WORLD_H - 40)
-            if all(math.hypot(x - p.x, y - p.y) > 220 for p in players):
+            if all(math.hypot(x - p.x, y - p.y) > safe_dist for p in players):
                 break
 
         ent = Entity(
@@ -171,14 +191,17 @@ class Sim:
                 continue
             dx, dy = o.x - e.x, o.y - e.y
             d = math.hypot(dx, dy)
-            if d > 360 or d < 1e-6:
+            if d < 1e-6:
                 continue
             if o.size >= e.size * EAT_RATIO:
-                flee_x -= dx / d
-                flee_y -= dy / d
+                if d <= NPC_FLEE_R:
+                    flee_x -= dx / d
+                    flee_y -= dy / d
             elif e.size >= o.size * EAT_RATIO:
-                chase_x += dx / d * (1.0 - d / 360)
-                chase_y += dy / d * (1.0 - d / 360)
+                if d <= NPC_CHASE_R:
+                    w = 1.0 - d / NPC_CHASE_R
+                    chase_x += dx / d * w * 0.75
+                    chase_y += dy / d * w * 0.75
 
         e.wander_t -= dt
         if e.wander_t <= 0:
@@ -186,8 +209,8 @@ class Sim:
             e.wander_ang = self.rng.uniform(0, math.tau)
 
         wx, wy = math.cos(e.wander_ang), math.sin(e.wander_ang)
-        dx = chase_x * 1.0 + wx * 0.6 + flee_x * 2.0
-        dy = chase_y * 1.0 + wy * 0.6 + flee_y * 2.0
+        dx = chase_x + wx * 0.85 + flee_x * 2.0
+        dy = chase_y + wy * 0.85 + flee_y * 2.0
 
         # 别出界
         if e.x < 70:
@@ -223,7 +246,7 @@ class Sim:
                 if dx or dy:
                     e.dirx, e.diry = dx, dy
 
-            sp = max_speed(e.size)
+            sp = max_speed(e.size) * (NPC_SPEED if e.kind == "npc" else 1.0)
             dvx = e.dirx * sp - e.vx
             dvy = e.diry * sp - e.vy
             dl = math.hypot(dvx, dvy)

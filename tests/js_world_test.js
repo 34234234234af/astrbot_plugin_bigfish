@@ -159,5 +159,37 @@ console.log("5) 整局 60 秒跑通（贪心 AI 驱动双方）");
   console.log(`     结算：${players.map((p) => `${p.name}=${p.score}(吃${p.eaten}/死${p.deaths})`).join("  ")}`);
 }
 
+console.log("6) NPC 生态平衡（别把玩家围死）");
+{
+  const w = new World([{ pid: "p1", name: "A" }], 60);
+  w.ents = w.ents.filter((e) => e.kind === "player"); // 清空已有 NPC
+  const base = Math.max(...w.players().map((p) => p.s));
+
+  let big = 0, small = 0, total = 0;
+  for (let k = 0; k < 600; k++) {
+    w.spawnNpc();
+    const e = w.ents[w.ents.length - 1];
+    total++;
+    if (e.s >= base * CFG.EAT_RATIO) big++;
+    if (e.s < base * 0.5) small++;
+    w.ents.pop(); // 刷完就删，避免"大鱼上限"影响分布统计
+  }
+  ok("能吃掉玩家的鱼 <= 8%", (big / total) * 100 <= 8, ((big / total) * 100).toFixed(1) + "%");
+  ok("小鱼（<玩家一半）>= 60%", (small / total) * 100 >= 60, ((small / total) * 100).toFixed(1) + "%");
+
+  // 场上同时存在的大鱼有上限
+  const w2 = new World([{ pid: "p1", name: "A" }], 60);
+  for (let k = 0; k < 60; k++) w2.spawnNpc();
+  const threats = w2.ents.filter(
+    (e) => e.kind === "npc" && e.alive && e.s >= CFG.PLAYER_START * CFG.EAT_RATIO
+  ).length;
+  ok("场上大鱼不超过上限", threats <= CFG.NPC_MAX_BIG + 1, threats);
+
+  // NPC 比玩家慢，才追得上 / 逃得掉
+  ok("NPC 速度系数 < 1", CFG.NPC_SPEED < 1, CFG.NPC_SPEED);
+  ok("捕食半径小于逃跑半径", CFG.NPC_CHASE_R < CFG.NPC_FLEE_R,
+     { chase: CFG.NPC_CHASE_R, flee: CFG.NPC_FLEE_R });
+}
+
 console.log(failed === 0 ? "\n前端规则全部通过 ✅" : `\n失败 ${failed} 项 ❌`);
 process.exit(failed === 0 ? 0 : 1);
