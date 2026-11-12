@@ -1,0 +1,42 @@
+name: tests
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 安装依赖
+        run: python -m pip install --upgrade pip aiohttp
+
+      - name: 纯逻辑对局
+        run: python tests/selftest.py
+
+      - name: 插件指令链路（astrbot 替身）
+        run: python tests/plugin_test.py
+
+      - name: 中继 + bot 端到端
+        run: python tests/e2e_test.py
+
+      - name: 前端规则引擎
+        run: node tests/js_world_test.js
+
+      - name: 前端房主端
+        run: node tests/js_client_test.js
+
+      - name: 前端游客端
+        run: node tests/js_guest_test.js

@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>大鱼吃小鱼 · 实时房间</title>
+<style>
+  :root{
+    --bg:#03131f; --bg2:#072b3f; --ink:#e8f6ff; --dim:#8fb6cc;
+    --accent:#38e1c8; --warn:#ff7a59; --gold:#ffd166;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  #cv{display:block;width:100vw;height:100vh;touch-action:none}
+  .hud{position:fixed;pointer-events:none;z-index:5}
+  #topbar{top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-start;
+    padding:12px 16px;gap:10px;font-size:14px}
+  .pill{background:rgba(4,32,48,.72);border:1px solid rgba(56,225,200,.25);border-radius:999px;
+    padding:6px 12px;backdrop-filter:blur(6px);white-space:nowrap}
+  #board{right:12px;top:56px;min-width:150px;max-width:46vw}
+  #board .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:13px}
+  #board .row.me{color:var(--accent);font-weight:700}
+  #board .t{color:var(--dim);font-size:11px;letter-spacing:.1em;margin-bottom:2px}
+  #timer{font-variant-numeric:tabular-nums;font-weight:700;font-size:16px}
+  #timer.low{color:var(--warn)}
+  .overlay{position:fixed;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;
+    padding:20px;background:radial-gradient(circle at 50% 40%,rgba(7,43,63,.86),rgba(2,10,18,.96));
+    backdrop-filter:blur(3px)}
+  .overlay.hidden{display:none}
+  .card{width:min(520px,100%);background:rgba(6,30,44,.94);border:1px solid rgba(56,225,200,.22);
+    border-radius:18px;padding:22px;box-shadow:0 24px 60px rgba(0,0,0,.55)}
+  .card h1{margin:0 0 4px;font-size:20px;letter-spacing:.02em}
+  .card h1 span{color:var(--accent)}
+  .sub{color:var(--dim);font-size:13px;line-height:1.7;margin:0 0 16px}
+  .code{font-family:ui-monospace,Consolas,monospace;font-size:26px;letter-spacing:.24em;
+    color:var(--gold);text-align:center;padding:10px 0 14px}
+  label{display:block;font-size:12px;color:var(--dim);margin:0 0 6px}
+  input{width:100%;padding:11px 13px;border-radius:11px;border:1px solid rgba(143,182,204,.28);
+    background:rgba(2,14,22,.9);color:var(--ink);font-size:15px;outline:none}
+  input:focus{border-color:var(--accent)}
+  button{width:100%;margin-top:14px;padding:13px;border:0;border-radius:12px;cursor:pointer;
+    background:linear-gradient(135deg,#38e1c8,#2ba8d6);color:#03212c;font-size:16px;font-weight:800;
+    transition:transform .08s ease,filter .15s}
+  button:active{transform:scale(.985)}
+  button:disabled{filter:grayscale(.65) brightness(.75);cursor:not-allowed}
+  button.ghost{background:rgba(56,225,200,.12);color:var(--accent);border:1px solid rgba(56,225,200,.3)}
+  .roster{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}
+  .chip{display:flex;align-items:center;gap:6px;padding:6px 11px;border-radius:999px;
+    background:rgba(56,225,200,.1);border:1px solid rgba(56,225,200,.22);font-size:13px}
+  .chip.bot{border-color:rgba(255,209,102,.4);background:rgba(255,209,102,.1)}
+  .chip.host{border-color:rgba(255,122,89,.45);background:rgba(255,122,89,.1)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .rows{margin:14px 0 0;font-size:14px}
+  .rows .r{display:flex;justify-content:space-between;padding:8px 12px;border-radius:10px;margin-bottom:6px;
+    background:rgba(56,225,200,.06)}
+  .rows .r.win{background:rgba(255,209,102,.14);color:var(--gold);font-weight:700}
+  .rows .r .m{color:var(--dim);font-size:12px;margin-left:8px}
+  #toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:30;
+    background:rgba(255,122,89,.92);color:#1a0700;padding:9px 16px;border-radius:999px;
+    font-size:13px;font-weight:700;opacity:0;transition:opacity .25s;pointer-events:none}
+  #toast.on{opacity:1}
+  #hint{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);font-size:12px;color:var(--dim);
+    z-index:4;pointer-events:none;text-align:center;line-height:1.6}
+  #joy{position:fixed;z-index:6;width:120px;height:120px;border-radius:50%;display:none;
+    border:2px solid rgba(56,225,200,.28);background:rgba(56,225,200,.07);pointer-events:none}
+  #joy.on{display:block}
+  #joy i{position:absolute;left:50%;top:50%;width:44px;height:44px;margin:-22px 0 0 -22px;
+    border-radius:50%;background:rgba(56,225,200,.5)}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div class="hud" id="topbar">
+  <div class="pill" id="timerPill"><span id="timer">--</span></div>
+  <div class="pill" id="mePill" style="display:none">我：<b id="meScore">0</b> 分 · 体型 <b id="meSize">20</b></div>
+</div>
+<div class="hud" id="board"><div class="t">排行榜</div><div id="boardRows"></div></div>
+
+<div class="overlay" id="lobby">
+  <div class="card">
+    <h1>🐟 大鱼吃小鱼 <span>· 实时房间</span></h1>
+    <p class="sub" id="lobbySub">正在连接房间…</p>
+    <div class="code" id="roomCode">------</div>
+    <label>你的名字</label>
+    <input id="nameInput" maxlength="12" placeholder="给自己起个鱼名">
+    <div class="roster" id="roster"></div>
+    <button id="startBtn" style="display:none">开始游戏</button>
+    <button id="reloadBtn" class="ghost" style="display:none">重新连接</button>
+  </div>
+</div>
+
+<div class="overlay hidden" id="result">
+  <div class="card">
+    <h1 id="resultTitle">本局结束</h1>
+    <p class="sub" id="resultSub"></p>
+    <div class="rows" id="resultRows"></div>
+    <button id="againBtn" style="display:none">再来一局</button>
+    <button id="closeBtn" class="ghost" style="display:none">退出</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="hint">WASD / 方向键移动 · 也可以按住鼠标或手指拖动</div>
+<div id="joy"><i></i></div>
+
+<script>
+(() => {
+"use strict";
+
+/* ============================ 规则常量（与 core/engine.py 保持一致） ============================ */
+const CFG = {
+  W: 1600, H: 900,
+  TICK: 1/30,
+  EAT_RATIO: 1.12,
+  PLAYER_START: 20,
+  MAX_SIZE: 110,
+  NPC_MIN: 8,
+  ACCEL: 1500,
+  NPC_TARGET: 26,
+  RESPAWN: 2.5,
+  INVULN: 2.0,
+  SCORE_PER_EAT: 10,
+  DURATION: 90,
+  BROADCAST_DT: 1/15,
+};
+const clamp = (v,a,b) => v<a?a:(v>b?b:v);
+const r1 = v => Math.round(v*10)/10;
+const maxSpeed = s => 300 - 150*clamp((s-CFG.PLAYER_START)/(CFG.MAX_SIZE-CFG.PLAYER_START),0,1);
+const eatReach = (a,b) => a*0.95 + b*0.30;
+
+const PALETTE = [
+  ["#ffb347","#ff8a3d"], ["#5ec8ff","#2a9fd6"], ["#a78bfa","#7c5cf0"],
+  ["#f472b6","#db2777"], ["#34d399","#059669"], ["#fbbf24","#d97706"],
+];
+const NPC_PALETTE = [
+  ["#7dd3fc","#0ea5e9"], ["#fca5a5","#ef4444"], ["#fcd34d","#f59e0b"],
+  ["#c4b5fd","#8b5cf6"], ["#86efac","#22c55e"], ["#fdba74","#f97316"],
+];
+
+/* ============================ 世界模拟（仅房主运行） ============================ */
+class World {
+  constructor(players, duration){
+    this.elapsed = 0;
+    this.duration = duration || CFG.DURATION;
+    this.ents = [];
+    this.inputs = {};       // pid -> {dx,dy}
+    this.rng = Math.random;
+    this.nextId = 1;
+    this.tk = 0;
+    players.forEach((p,i) => {
+      const ang = Math.PI*2*i/Math.max(1,players.length);
+      this.ents.push({
+        i: this.nextId++, kind:"player", pid:p.pid, name:p.name, skill:p.skill||0.7,
+        x: CFG.W/2 + Math.cos(ang)*260, y: CFG.H/2 + Math.sin(ang)*200,
+        vx:0, vy:0, dirx:1, diry:0, s: CFG.PLAYER_START, alive:true,
+        respawnAt:0, invulnUntil:0, eaten:0, deaths:0, score:0, maxSize:CFG.PLAYER_START,
+        color:i%PALETTE.length, wanderAng:Math.random()*Math.PI*2, wanderT:0,
+      });
+    });
+    for(let k=0;k<CFG.NPC_TARGET;k++) this.spawnNpc();
+  }
+  players(){ return this.ents.filter(e => e.kind === "player"); }
+  spawnNpc(){
+    const ps = this.players();
+    const base = ps.length ? Math.max(...ps.map(p=>p.s)) : CFG.PLAYER_START;
+    const roll = this.rng();
+    let size;
+    if(roll < 0.10)      size = base*this.rand(1.05,1.6);
+    else if(roll < 0.52) size = base*this.rand(0.35,0.90);
+    else                 size = base*this.rand(0.12,0.35);
+    size = clamp(size, CFG.NPC_MIN, CFG.MAX_SIZE);
+    let x=0,y=0;
+    for(let k=0;k<12;k++){
+      x = this.rand(40, CFG.W-40); y = this.rand(40, CFG.H-40);
+      if(ps.every(p => Math.hypot(x-p.x, y-p.y) > 220)) break;
+    }
+    this.ents.push({
+      i: this.nextId++, kind:"npc", pid:"", name:"", skill:0,
+      x, y, vx:0, vy:0, dirx:1, diry:0, s:size, alive:true,
+      respawnAt:0, invulnUntil:0, eaten:0, deaths:0, score:0, maxSize:size,
+      color: Math.floor(this.rng()*NPC_PALETTE.length),
+      wanderAng: Math.random()*Math.PI*2, wanderT:0,
+    });
+  }
+  rand(a,b){ return a + this.rng()*(b-a); }
+
+  setInput(pid, dx, dy){
+    this.inputs[pid] = {dx, dy};
+  }
+  addPlayer(p){
+    if(this.players().some(e => e.pid === p.pid)) return;
+    this.ents.push({
+      i: this.nextId++, kind:"player", pid:p.pid, name:p.name, skill:p.skill||0.7,
+      x: CFG.W/2 + this.rand(-300,300), y: CFG.H/2 + this.rand(-200,200),
+      vx:0, vy:0, dirx:1, diry:0, s: CFG.PLAYER_START, alive:true,
+      respawnAt:0, invulnUntil:this.elapsed+CFG.INVULN, eaten:0, deaths:0, score:0,
+      maxSize:CFG.PLAYER_START, color:this.players().length%PALETTE.length,
+      wanderAng:0, wanderT:0,
+    });
+  }
+  removePlayer(pid){
+    this.ents = this.ents.filter(e => !(e.kind === "player" && e.pid === pid));
+  }
+
+  steerNpc(e){
+    let fx=0, fy=0, cx=0, cy=0;
+    for(const o of this.ents){
+      if(o === e || !o.alive) continue;
+      const dx = o.x-e.x, dy = o.y-e.y, d = Math.hypot(dx,dy);
+      if(d > 360 || d < 1e-6) continue;
+      if(o.s >= e.s*CFG.EAT_RATIO){ fx -= dx/d; fy -= dy/d; }
+      else if(e.s >= o.s*CFG.EAT_RATIO){ const w = 1-d/360; cx += dx/d*w; cy += dy/d*w; }
+    }
+    e.wanderT -= CFG.TICK;
+    if(e.wanderT <= 0){ e.wanderT = this.rand(0.8,2.4); e.wanderAng = Math.random()*Math.PI*2; }
+    let dx = cx + Math.cos(e.wanderAng)*0.6 + fx*2.0;
+    let dy = cy + Math.sin(e.wanderAng)*0.6 + fy*2.0;
+    if(e.x < 70) dx += 0.8; else if(e.x > CFG.W-70) dx -= 0.8;
+    if(e.y < 70) dy += 0.8; else if(e.y > CFG.H-70) dy -= 0.8;
+    const d = Math.hypot(dx,dy);
+    if(d > 1e-6){ e.dirx = dx/d; e.diry = dy/d; } else { e.dirx = e.diry = 0; }
+  }
+
+  respawn(e){
+    e.alive = true; e.s = CFG.PLAYER_START; e.vx = e.vy = 0;
+    e.invulnUntil = this.elapsed + CFG.INVULN;
+    let x = CFG.W/2, y = CFG.H/2;
+    for(let k=0;k<40;k++){
+      const cx = this.rand(60, CFG.W-60), cy = this.rand(60, CFG.H-60);
+      const need = k<30 ? 300 : 160;
+      const safe = this.ents.every(o => o===e || !o.alive ||
+        o.s < CFG.PLAYER_START*CFG.EAT_RATIO || Math.hypot(cx-o.x, cy-o.y) >= need);
+      if(safe){ x = cx; y = cy; break; }
+    }
+    e.x = x; e.y = y;
+  }
+
+  step(dt){
+    if(this.elapsed >= this.duration) return true;
+    this.elapsed += dt;
+
+    for(const e of this.ents){
+      if(!e.alive){
+        if(e.kind === "player" && this.elapsed >= e.respawnAt) this.respawn(e);
+        continue;
+      }
+      if(e.kind === "npc") this.steerNpc(e);
+      else {
+        const inp = this.inputs[e.pid];
+        if(inp){
+          const d = Math.hypot(inp.dx, inp.dy);
+          if(d > 1e-6){ e.dirx = inp.dx/d; e.diry = inp.dy/d; }
+          else { e.dirx = e.diry = 0; }
+        }
+      }
+      const sp = maxSpeed(e.s);
+      let dvx = e.dirx*sp - e.vx, dvy = e.diry*sp - e.vy;
+      const dl = Math.hypot(dvx,dvy), maxdv = CFG.ACCEL*dt;
+      if(dl > maxdv && dl > 0){ dvx = dvx/dl*maxdv; dvy = dvy/dl*maxdv; }
+      e.vx += dvx; e.vy += dvy;
+      e.x = clamp(e.x + e.vx*dt, e.s, CFG.W-e.s);
+      e.y = clamp(e.y + e.vy*dt, e.s, CFG.H-e.s);
+    }
+
+    this.resolveEat();
+
+    let aliveNpc = this.ents.filter(e => e.kind==="npc" && e.alive).length;
+    for(let k=0; k<Math.min(3, CFG.NPC_TARGET-aliveNpc); k++) this.spawnNpc();
+    this.ents = this.ents.filter(e => e.alive || e.kind === "player");
+    return this.elapsed >= this.duration;
+  }
+
+  resolveEat(){
+    const alive = this.ents.filter(e => e.alive);
+    for(const a of alive){
+      if(!a.alive) continue;
+      for(const b of alive){
+        if(a===b || !b.alive || !a.alive) continue;
+        if(a.s < b.s*CFG.EAT_RATIO) continue;
+        if(a.invulnUntil > this.elapsed || b.invulnUntil > this.elapsed) continue;
+        if(Math.hypot(a.x-b.x, a.y-b.y) > eatReach(a.s,b.s)) continue;
+        const gain = Math.floor(b.s) + CFG.SCORE_PER_EAT;
+        a.score += gain; a.eaten += 1;
+        a.s = Math.min(CFG.MAX_SIZE, Math.sqrt(a.s*a.s + 0.5*b.s*b.s));
+        a.maxSize = Math.max(a.maxSize, a.s);
+        b.alive = false;
+        if(b.kind === "player"){
+          b.deaths += 1; b.respawnAt = this.elapsed + CFG.RESPAWN; b.vx = b.vy = 0;
+          if(a.kind === "player" && a.pid === myPid) toast("吃掉了一条鱼 +"+gain);
+          if(b.pid === myPid) toast("你被吃掉了，稍后复活");
+        }
+      }
+    }
+  }
+
+  snapshot(){
+    this.tk++;
+    return {
+      t: "state", tk: this.tk,
+      tl: r1(Math.max(0, this.duration - this.elapsed)),
+      w: CFG.W, h: CFG.H,
+      ents: this.ents.map(e => ({
+        i:e.i, x:r1(e.x), y:r1(e.y), s:r1(e.s),
+        p:e.pid||"", n:e.name||"", a:e.alive?1:0,
+        r:e.alive?0:r1(Math.max(0, e.respawnAt-this.elapsed)),
+        v:e.invulnUntil>this.elapsed?1:0,
+      })),
+      sc: Object.fromEntries(this.players().map(p => [p.pid, {s:p.score, e:p.eaten, d:p.deaths}])),
+    };
+  }
+
+  result(){
+    const rows = this.players()
+      .map(p => ({id:p.pid, name:p.name, score:p.score, eaten:p.eaten,
+                  deaths:p.deaths, max_size:r1(p.maxSize)}))
+      .sort((a,b) => b.score - a.score);
+    return {
+      duration: r1(Math.min(this.elapsed, this.duration)),
+      players: rows,
+      winner: rows.length ? rows[0].id : "",
+    };
+  }
+}
+
+/* ============================ 网络 ============================ */
+const qs = new URLSearchParams(location.search);
+const ROOM = (qs.get("room") || "").toUpperCase();
+let NAME = localStorage.getItem("bigfish_name") || "";
+let ws = null, myPid = "", myRole = "guest", roster = [], roomMax = 2;
+let hostWorld = null, playing = false, lastResult = null;
+let remoteState = null, remoteTk = 0;
+let netStatus = "connecting";
+
+const $ = id => document.getElementById(id);
+
+function toast(msg){
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.classList.remove("on"), 1900);
+}
+
+function connect(){
+  if(!ROOM){ setLobby("缺少房间号，请从群里的链接进入。"); return; }
+  netStatus = "connecting";
+  setLobby("正在连接房间…");
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${proto}://${location.host}/ws?room=${encodeURIComponent(ROOM)}` +
+              `&name=${encodeURIComponent(NAME || "无名鱼")}&role=auto`;
+  try { ws = new WebSocket(url); } catch(e){ setLobby("连接失败：" + e.message); return; }
+
+  ws.onopen = () => { netStatus = "open"; };
+  ws.onclose = () => {
+    netStatus = "closed";
+    if(playing || hostWorld){ setLobby("连接断开了，点下面的按钮重连。"); showReload(true); }
+  };
+  ws.onerror = () => { netStatus = "error"; };
+  ws.onmessage = ev => {
+    let d; try { d = JSON.parse(ev.data); } catch(e){ return; }
+    handle(d);
+  };
+}
+
+function send(obj){
+  if(ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
+}
+
+function handle(d){
+  switch(d.t){
+    case "welcome": {
+      myPid = d.pid; myRole = d.role; roster = d.roster || []; roomMax = d.max_players || 2;
+      $("roomCode").textContent = d.room;
+      renderRoster();
+      if(myRole === "host"){
+        setLobby("你是房主，游戏会在你的浏览器里运行。等人进来后点开始。");
+        $("startBtn").style.display = "";
+        $("startBtn").disabled = roster.filter(r => r.role !== "host").length === 0;
+      } else {
+        setLobby("已进入房间，等房主点“开始游戏”。");
+        $("startBtn").style.display = "none";
+      }
+      if(d.started && myRole !== "host") setLobby("本局已经开始，等下一局吧。");
+      break;
+    }
+    case "roster":
+      roster = d.roster || [];
+      renderRoster();
+      if(myRole === "host" && !playing){
+        $("startBtn").disabled = roster.filter(r => r.role !== "host").length === 0;
+      }
+      break;
+    case "peer_join":
+      if(myRole === "host" && hostWorld){
+        hostWorld.addPlayer({pid: d.pid, name: d.name});
+      }
+      toast(`${d.name || "有人"} 进房了`);
+      break;
+    case "peer_leave":
+      if(myRole === "host" && hostWorld) hostWorld.removePlayer(d.pid);
+      break;
+    case "start":
+      enterGame();
+      break;
+    case "state":
+      remoteState = d; remoteTk = d.tk || 0;
+      if(!playing && myRole !== "host" && d.ents) enterGame();
+      break;
+    case "end":
+      lastResult = d.result || null;
+      showResult(lastResult);
+      break;
+    case "room_closed":
+    case "host_left":
+      playing = false; hostWorld = null;
+      setLobby(d.msg || "房间已关闭");
+      showReload(true);
+      break;
+    case "error":
+      setLobby(d.msg || "出错了");
+      if(d.fatal){ showReload(true); }
+      break;
+  }
+}
+
+function setLobby(text){
+  $("lobbySub").textContent = text;
+  $("lobby").classList.remove("hidden");
+  $("result").classList.add("hidden");
+}
+function showReload(on){ $("reloadBtn").style.display = on ? "" : "none"; }
+
+function renderRoster(){
+  const box = $("roster");
+  box.innerHTML = "";
+  for(const r of roster){
+    const el = document.createElement("div");
+    el.className = "chip" + (r.role === "bot" ? " bot" : (r.role === "host" ? " host" : ""));
+    const dot = document.createElement("i"); dot.className = "dot";
+    if(r.role === "bot") dot.style.background = "#ffd166";
+    if(r.role === "host") dot.style.background = "#ff7a59";
+    el.appendChild(dot);
+    el.appendChild(document.createTextNode(
+      r.name + (r.role === "host" ? "（房主）" : r.role === "bot" ? "（bot）" : "") +
+      (r.pid === myPid ? " · 我" : "")
+    ));
+    box.appendChild(el);
+  }
+  if(!roster.length) box.innerHTML = '<div class="chip">还没有人</div>';
+}
+
+/* ============================ 开局 / 结算 ============================ */
+function startMatch(){
+  if(myRole !== "host") return;
+  const players = [{pid: myPid, name: nameOf(myPid)}];
+  for(const r of roster) if(r.pid !== myPid) players.push({pid: r.pid, name: r.name});
+  hostWorld = new World(players, CFG.DURATION);
+  enterGame();
+  send({t:"start"});
+}
+
+function nameOf(pid){
+  const r = roster.find(x => x.pid === pid);
+  return r ? r.name : "我";
+}
+
+function enterGame(){
+  playing = true;
+  $("lobby").classList.add("hidden");
+  $("result").classList.add("hidden");
+  $("mePill").style.display = "";
+  $("hint").style.display = "";
+}
+
+function showResult(res){
+  playing = false;
+  const rows = (res && res.players) || [];
+  $("resultTitle").textContent = rows.length && rows[0].id === myPid ? "🏆 你赢了！" : "本局结束";
+  $("resultSub").textContent = res
+    ? `时长 ${Math.round(res.duration || 0)} 秒 · 房主浏览器结算`
+    : "没有拿到结果";
+  const box = $("resultRows");
+  box.innerHTML = "";
+  rows.forEach((r,i) => {
+    const el = document.createElement("div");
+    el.className = "r" + (i === 0 ? " win" : "");
+    const left = document.createElement("span");
+    left.textContent = `${["🥇","🥈","🥉"][i] || "　"} ${r.name}${r.id === myPid ? "（我）" : ""}`;
+    const right = document.createElement("span");
+    right.innerHTML = `${r.score} 分<span class="m">吃 ${r.eaten} · 被吃 ${r.deaths}</span>`;
+    el.appendChild(left); el.appendChild(right);
+    box.appendChild(el);
+  });
+  $("result").classList.remove("hidden");
+  $("againBtn").style.display = myRole === "host" ? "" : "none";
+  $("startBtn").style.display = myRole === "host" ? "" : "none";
+  if(playing) $("lobby").classList.add("hidden");
+}
+
+/* ============================ 输入 ============================ */
+const keys = Object.create(null);
+let pointerDir = {x:0, y:0, active:false};
+let touchId = null, joyOrigin = {x:0,y:0};
+
+addEventListener("keydown", e => {
+  const k = e.key.toLowerCase();
+  if(["arrowup","arrowdown","arrowleft","arrowright"," "].includes(k)) e.preventDefault();
+  keys[k] = true;
+});
+addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+
+function keyDir(){
+  let x = 0, y = 0;
+  if(keys["a"] || keys["arrowleft"])  x -= 1;
+  if(keys["d"] || keys["arrowright"]) x += 1;
+  if(keys["w"] || keys["arrowup"])    y -= 1;
+  if(keys["s"] || keys["arrowdown"])  y += 1;
+  return {x, y};
+}
+
+const cv = $("cv");
+function viewScale(){
+  return { sc: Math.min(cv.width/CFG.W, cv.height/CFG.H) };
+}
+function screenToWorld(clientX, clientY){
+  const {sc} = viewScale();
+  const ox = (cv.width - CFG.W*sc)/2, oy = (cv.height - CFG.H*sc)/2;
+  return { x: (clientX*devicePixelRatio - ox)/sc, y: (clientY*devicePixelRatio - oy)/sc };
+}
+
+cv.addEventListener("pointerdown", e => {
+  cv.setPointerCapture(e.pointerId);
+  if(e.pointerType === "touch"){
+    touchId = e.pointerId;
+    joyOrigin = {x: e.clientX, y: e.clientY};
+    const joy = $("joy");
+    joy.classList.add("on");
+    joy.style.left = (e.clientX - 60) + "px";
+    joy.style.top = (e.clientY - 60) + "px";
+    pointerDir.active = true;
+  } else {
+    pointerDir.active = true;
+  }
+});
+cv.addEventListener("pointermove", e => {
+  if(e.pointerType === "touch" && e.pointerId === touchId){
+    const dx = e.clientX - joyOrigin.x, dy = e.clientY - joyOrigin.y;
+    const d = Math.hypot(dx,dy) || 1;
+    const cap = Math.min(1, d/56);
+    pointerDir.x = dx/d*cap; pointerDir.y = dy/d*cap;
+    const knob = $("joy").firstElementChild;
+    knob.style.transform = `translate(${dx/d*Math.min(d,56)}px, ${dy/d*Math.min(d,56)}px)`;
+    return;
+  }
+  if(pointerDir.active && e.pointerType !== "touch"){
+    const me = myEnt();
+    if(!me) return;
+    const w = screenToWorld(e.clientX, e.clientY);
+    const dx = w.x - me.x, dy = w.y - me.y, d = Math.hypot(dx,dy) || 1;
+    pointerDir.x = dx/d; pointerDir.y = dy/d;
+    pointerDir.screen = true;
+  }
+});
+function endPointer(e){
+  if(e.pointerType === "touch" && e.pointerId === touchId){
+    touchId = null;
+    $("joy").classList.remove("on");
+    $("joy").firstElementChild.style.transform = "";
+  }
+  pointerDir = {x:0, y:0, active:false};
+}
+cv.addEventListener("pointerup", endPointer);
+cv.addEventListener("pointercancel", endPointer);
+cv.addEventListener("pointerleave", e => { if(e.pointerType !== "touch") endPointer(e); });
+
+let cachedDir = {x:1, y:0};
+function currentDir(){
+  const k = keyDir();
+  if(k.x || k.y){
+    const d = Math.hypot(k.x,k.y);
+    cachedDir = {x: k.x/d, y: k.y/d};
+    return cachedDir;
+  }
+  if(pointerDir.active && (pointerDir.x || pointerDir.y)){
+    return {x: pointerDir.x, y: pointerDir.y};
+  }
+  return cachedDir;
+}
+function myEnt(){
+  if(myRole === "host" && hostWorld){
+    return hostWorld.ents.find(e => e.kind === "player" && e.pid === myPid);
+  }
+  if(remoteState && remoteState.ents){
+    const e = remoteState.ents.find(x => x.p === myPid);
+    return e ? {x:e.x, y:e.y} : null;
+  }
+  return null;
+}
+
+/* ============================ 渲染 ============================ */
+const cvx = cv.getContext("2d");
+const rent = new Map();     // 渲染用的实体表（房主和客户端共用）
+let bubbles = [];
+
+function resize(){
+  cv.width = innerWidth * devicePixelRatio;
+  cv.height = innerHeight * devicePixelRatio;
+  cv.style.width = innerWidth + "px";
+  cv.style.height = innerHeight + "px";
+  bubbles = Array.from({length: 46}, () => ({
+    x: Math.random(), y: Math.random(), r: 1 + Math.random()*3.2, sp: 0.008 + Math.random()*0.02,
+  }));
+}
+addEventListener("resize", resize);
+
+function syncRender(dt){
+  const hostMode = myRole === "host" && !!hostWorld && playing;
+  const src = hostMode ? hostWorld.ents : ((remoteState && remoteState.ents) || []);
+  const seen = new Set();
+
+  for(const raw of src){
+    const e = hostMode ? {
+      i: raw.i, x: raw.x, y: raw.y, s: raw.s,
+      p: raw.pid || "", n: raw.name || "",
+      a: raw.alive ? 1 : 0,
+      r: raw.alive ? 0 : Math.max(0, raw.respawnAt - hostWorld.elapsed),
+      v: raw.invulnUntil > hostWorld.elapsed ? 1 : 0,
+      vx: raw.vx, vy: raw.vy,
+    } : raw;
+
+    seen.add(e.i);
+    let r = rent.get(e.i);
+    if(!r){
+      r = {aid:e.i, x:e.x, y:e.y, s:e.s, tx:e.x, ty:e.y, ts:e.s,
+           ang:0, pid:e.p||"", alive:1, invuln:0, name:e.n||"",
+           npc:false, color:e.i, vx:0, vy:0, respawn:0};
+      rent.set(e.i, r);
+    }
+    if(hostMode){
+      r.x = e.x; r.y = e.y; r.s = e.s; r.vx = e.vx || 0; r.vy = e.vy || 0;
+      r.ang = Math.atan2(r.vy || 0.001, r.vx || 0.001);
+      if(!r.vx && !r.vy) r.ang = r.ang || 0;
+    } else {
+      const f = Math.min(1, dt * 16);
+      const ox = r.x, oy = r.y;
+      r.px = ox; r.py = oy;
+      r.x += ((e.x ?? r.x) - r.x) * f;
+      r.y += ((e.y ?? r.y) - r.y) * f;
+      r.s += ((e.s ?? r.s) - r.s) * f;
+      if(Math.abs(r.x-ox) + Math.abs(r.y-oy) > 0.05){
+        r.ang = Math.atan2(r.y-oy, r.x-ox);
+      }
+    }
+    r.alive = e.a === undefined ? 1 : e.a;
+    r.invuln = e.v || 0;
+    r.pid = e.p || "";
+    r.name = e.n || "";
+    r.npc = !(e.p);
+    r.respawn = e.r || 0;
+    r.color = e.i;
+  }
+  for(const k of [...rent.keys()]) if(!seen.has(k)) rent.delete(k);
+}
+
+function drawBackground(now){
+  const g = cvx.createLinearGradient(0,0,0,cv.height);
+  g.addColorStop(0, "#072b3f");
+  g.addColorStop(0.55, "#04202f");
+  g.addColorStop(1, "#020c15");
+  cvx.fillStyle = g;
+  cvx.fillRect(0,0,cv.width,cv.height);
+
+  // 光柱
+  cvx.save();
+  cvx.globalAlpha = 0.05;
+  for(let i=0;i<5;i++){
+    const x = cv.width*(0.12 + i*0.19) + Math.sin(now/4200 + i)*40;
+    cvx.beginPath();
+    cvx.moveTo(x, 0); cvx.lineTo(x + cv.width*0.05, 0);
+    cvx.lineTo(x + cv.width*0.11, cv.height); cvx.lineTo(x + cv.width*0.02, cv.height);
+    cvx.closePath();
+    cvx.fillStyle = "#9be8ff";
+    cvx.fill();
+  }
+  cvx.restore();
+
+  // 气泡
+  cvx.save();
+  cvx.strokeStyle = "rgba(155,232,255,.22)";
+  for(const b of bubbles){
+    b.y -= b.sp * 0.016;
+    if(b.y < -0.05){ b.y = 1.05; b.x = Math.random(); }
+    cvx.beginPath();
+    cvx.arc(b.x*cv.width, b.y*cv.height, b.r*devicePixelRatio, 0, Math.PI*2);
+    cvx.stroke();
+  }
+  cvx.restore();
+}
+
+function drawFish(x, y, size, ang, colorIdx, npc, alpha, invuln){
+  const pal = (npc ? NPC_PALETTE : PALETTE)[colorIdx % (npc ? NPC_PALETTE.length : PALETTE.length)];
+  cvx.save();
+  cvx.translate(x, y);
+  cvx.rotate(ang);
+  cvx.globalAlpha = alpha;
+
+  if(invuln){ cvx.shadowColor = "#38e1c8"; cvx.shadowBlur = 18; }
+
+  // 尾巴
+  cvx.beginPath();
+  cvx.moveTo(-size*0.85, 0);
+  cvx.lineTo(-size*1.75, -size*0.62);
+  cvx.lineTo(-size*1.5, 0);
+  cvx.lineTo(-size*1.75, size*0.62);
+  cvx.closePath();
+  cvx.fillStyle = pal[1];
+  cvx.fill();
+
+  // 身体
+  const grd = cvx.createLinearGradient(0, -size, 0, size);
+  grd.addColorStop(0, pal[0]); grd.addColorStop(1, pal[1]);
+  cvx.beginPath();
+  cvx.ellipse(0, 0, size*1.15, size*0.82, 0, 0, Math.PI*2);
+  cvx.fillStyle = grd;
+  cvx.fill();
+  cvx.lineWidth = Math.max(1, size*0.06);
+  cvx.strokeStyle = "rgba(255,255,255,.35)";
+  cvx.stroke();
+
+  // 眼睛
+  cvx.beginPath();
+  cvx.arc(size*0.62, -size*0.2, Math.max(1.6, size*0.16), 0, Math.PI*2);
+  cvx.fillStyle = "#fff"; cvx.fill();
+  cvx.beginPath();
+  cvx.arc(size*0.66, -size*0.2, Math.max(0.9, size*0.08), 0, Math.PI*2);
+  cvx.fillStyle = "#06202c"; cvx.fill();
+
+  cvx.restore();
+}
+
+function draw(now){
+  drawBackground(now);
+  const {sc} = viewScale();
+  const ox = (cv.width - CFG.W*sc)/2, oy = (cv.height - CFG.H*sc)/2;
+
+  cvx.save();
+  cvx.translate(ox, oy);
+  cvx.scale(sc, sc);
+
+  // 场地边框
+  cvx.strokeStyle = "rgba(56,225,200,.18)";
+  cvx.lineWidth = 3/sc;
+  cvx.strokeRect(0,0,CFG.W,CFG.H);
+
+  const list = [...rent.values()].sort((a,b) => a.s - b.s);
+  for(const r of list){
+    if(!r.alive){
+      // 复活中的幽灵
+      cvx.save();
+      cvx.globalAlpha = 0.35;
+      cvx.beginPath();
+      cvx.arc(r.x, r.y, 15, 0, Math.PI*2);
+      cvx.strokeStyle = "#8fb6cc";
+      cvx.lineWidth = 2;
+      cvx.stroke();
+      cvx.restore();
+      if(r.pid === myPid){
+        cvx.save();
+        cvx.fillStyle = "#8fb6cc";
+        cvx.font = `${Math.max(12, 16/sc)}px sans-serif`;
+        cvx.textAlign = "center";
+        cvx.fillText(r.respawn ? `${r.respawn.toFixed(1)}s 后复活` : "复活中", r.x, r.y - 26);
+        cvx.restore();
+      }
+      continue;
+    }
+    const me = r.pid === myPid;
+    if(me){
+      cvx.save();
+      cvx.beginPath();
+      cvx.arc(r.x, r.y, r.s*1.5, 0, Math.PI*2);
+      cvx.strokeStyle = "rgba(56,225,200,.55)";
+      cvx.lineWidth = 2/sc;
+      cvx.stroke();
+      cvx.restore();
+    }
+    const blink = r.invuln ? (0.55 + 0.45*Math.sin(now/90)) : 1;
+    drawFish(r.x, r.y, r.s, r.ang, r.color, r.npc, blink, r.invuln);
+    if(!r.npc){
+      cvx.save();
+      cvx.font = `700 ${Math.max(11, 13/sc * 1.5)}px "PingFang SC",sans-serif`;
+      cvx.textAlign = "center";
+      cvx.fillStyle = me ? "#38e1c8" : "rgba(232,246,255,.8)";
+      cvx.fillText(r.name || "", r.x, r.y - r.s*1.35);
+      cvx.restore();
+    }
+  }
+  cvx.restore();
+}
+
+/* ============================ 主循环 ============================ */
+let last = performance.now(), acc = 0, bcAcc = 0, lastInputSent = 0;
+
+function loop(now){
+  const dtRaw = Math.min(0.1, (now - last)/1000);
+  last = now;
+  syncRender(dtRaw);
+
+  if(myRole === "host" && playing && hostWorld){
+    // 固定步长推进
+    acc += dtRaw;
+    let guard = 0;
+    while(acc >= CFG.TICK && guard++ < 8){
+      const done = hostWorld.step(CFG.TICK);
+      acc -= CFG.TICK;
+      if(done){
+        finishMatch();   // 这里会把 hostWorld 置空
+        break;
+      }
+    }
+    if(hostWorld){
+      // 下发自己的输入
+      const dir = currentDir();
+      hostWorld.setInput(myPid, dir.x, dir.y);
+
+      // 广播状态
+      bcAcc += dtRaw;
+      if(bcAcc >= CFG.BROADCAST_DT){
+        bcAcc = 0;
+        send(hostWorld.snapshot());
+      }
+    } else {
+      acc = 0; bcAcc = 0;
+    }
+  } else if(myRole !== "host" && playing){
+    const dir = currentDir();
+    if(now - lastInputSent > 50){
+      lastInputSent = now;
+      send({t:"input", dx: Math.round(dir.x*1000)/1000, dy: Math.round(dir.y*1000)/1000});
+    }
+    updateHudFromState();
+  }
+
+  if(myRole === "host" && playing) updateHudFromWorld();
+
+  draw(now);
+  requestAnimationFrame(loop);
+}
+
+function finishMatch(){
+  playing = false;
+  const res = hostWorld.result();
+  lastResult = res;
+  send({t:"end", result: res});
+  showResult(res);
+  hostWorld = null;
+}
+
+function updateHudFromWorld(){
+  const me = hostWorld.players().find(p => p.pid === myPid);
+  const left = Math.max(0, hostWorld.duration - hostWorld.elapsed);
+  setTimer(left);
+  if(me){
+    $("meScore").textContent = me.score;
+    $("meSize").textContent = Math.round(me.s);
+  }
+  renderBoard(hostWorld.players().map(p => ({name:p.name, pid:p.pid, score:p.score})));
+}
+
+function updateHudFromState(){
+  if(!remoteState) return;
+  setTimer(remoteState.tl || 0);
+  const mine = remoteState.sc && remoteState.sc[myPid];
+  if(mine){
+    $("meScore").textContent = mine.s || 0;
+    const e = (remoteState.ents || []).find(x => x.p === myPid);
+    $("meSize").textContent = e ? Math.round(e.s) : "-";
+  }
+  const rows = (remoteState.ents || [])
+    .filter(e => e.p)
+    .map(e => ({name: e.n || "?", pid: e.p, score: (remoteState.sc && remoteState.sc[e.p] && remoteState.sc[e.p].s) || 0}))
+    .sort((a,b) => b.score - a.score);
+  renderBoard(rows);
+}
+
+function setTimer(sec){
+  const el = $("timer");
+  el.textContent = `${Math.ceil(sec)}s`;
+  el.parentElement.classList.toggle("low", sec <= 15);
+}
+
+function renderBoard(rows){
+  const box = $("boardRows");
+  box.innerHTML = "";
+  for(const r of rows.slice(0,6)){
+    const d = document.createElement("div");
+    d.className = "row" + (r.pid === myPid ? " me" : "");
+    d.innerHTML = `<span>${escapeHtml(r.name)}</span><span>${r.score}</span>`;
+    box.appendChild(d);
+  }
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+/* ============================ 启动 ============================ */
+$("nameInput").value = NAME;
+$("nameInput").addEventListener("change", e => {
+  NAME = e.target.value.trim().slice(0,12);
+  localStorage.setItem("bigfish_name", NAME);
+});
+
+$("startBtn").addEventListener("click", () => {
+  if(!NAME){
+    NAME = $("nameInput").value.trim().slice(0,12) || "房主";
+    localStorage.setItem("bigfish_name", NAME);
+  }
+  startMatch();
+});
+$("againBtn").addEventListener("click", () => {
+  $("result").classList.add("hidden");
+  startMatch();
+});
+$("reloadBtn").addEventListener("click", () => { location.reload(); });
+$("closeBtn").addEventListener("click", () => { location.href = "about:blank"; });
+
+resize();
+connect();
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

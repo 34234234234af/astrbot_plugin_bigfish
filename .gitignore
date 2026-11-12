@@ -1,0 +1,22 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# ---- 插件运行时数据（由 AstrBot 写到 data/plugin_data 下）----
+data/
+*.tmp
+
+# ---- 测试临时数据 ----
+tests/_stub_data/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- 打包产物 ----
+*.zip

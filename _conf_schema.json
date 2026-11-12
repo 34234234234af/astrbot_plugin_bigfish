@@ -1,0 +1,99 @@
+{
+  "relay_host": {
+    "description": "中继监听地址",
+    "type": "string",
+    "default": "0.0.0.0",
+    "hint": "一般不用改。放在 Nginx 后面时保持 0.0.0.0 或 127.0.0.1。"
+  },
+  "relay_port": {
+    "description": "中继端口",
+    "type": "int",
+    "default": 8317,
+    "hint": "需要在服务器/安全组放行这个端口（除非前面套了反向代理）。"
+  },
+  "public_base_url": {
+    "description": "公网访问地址",
+    "type": "string",
+    "default": "",
+    "hint": "例如 https://fish.example.com。留空则自动用「服务器内网IP:端口」，群里的人可能打不开。"
+  },
+  "max_players": {
+    "description": "每个房间最多几个真人",
+    "type": "int",
+    "default": 2,
+    "slider": {"min": 1, "max": 8, "step": 1},
+    "hint": "bot 不占位置。2 就是一局双人。"
+  },
+  "match_seconds": {
+    "description": "单局时长（秒）",
+    "type": "int",
+    "default": 90,
+    "slider": {"min": 30, "max": 300, "step": 10}
+  },
+  "room_ttl_minutes": {
+    "description": "空房间保留时长（分钟）",
+    "type": "int",
+    "default": 180,
+    "slider": {"min": 10, "max": 1440, "step": 10}
+  },
+  "bot_plays": {
+    "description": "开房时让 bot 进房一起玩",
+    "type": "bool",
+    "default": true
+  },
+  "bot_name": {
+    "description": "bot 在游戏里的名字",
+    "type": "string",
+    "default": "小鱼苗"
+  },
+  "bot_skill": {
+    "description": "bot 的操作水平",
+    "type": "float",
+    "default": 0.75,
+    "slider": {"min": 0.1, "max": 1.0, "step": 0.05},
+    "hint": "太高会把人虐哭，0.6~0.8 比较合适。"
+  },
+  "idle_enabled": {
+    "description": "空闲时让 bot 自己玩",
+    "type": "bool",
+    "default": true
+  },
+  "idle_minutes": {
+    "description": "多久没人说话算「无聊」（分钟）",
+    "type": "int",
+    "default": 90,
+    "slider": {"min": 10, "max": 720, "step": 10}
+  },
+  "idle_cooldown_minutes": {
+    "description": "两次自娱之间的最小间隔（分钟）",
+    "type": "int",
+    "default": 120,
+    "slider": {"min": 10, "max": 720, "step": 10}
+  },
+  "idle_daily_limit": {
+    "description": "每天最多自娱几次",
+    "type": "int",
+    "default": 3,
+    "slider": {"min": 0, "max": 24, "step": 1},
+    "hint": "0 表示不限制。"
+  },
+  "report_umo": {
+    "description": "战绩汇报到哪个会话",
+    "type": "string",
+    "default": "",
+    "_special": "umo",
+    "hint": "留空则汇报给最近一个私聊过 bot 的人。填了就不用先私聊。"
+  },
+  "selfplay_solo": {
+    "description": "自娱时只自己一个人玩（没有对手）",
+    "type": "bool",
+    "default": false,
+    "hint": "关掉（默认）时会给自己安排一个随机 AI 对手，这样才有输赢可汇报。"
+  },
+  "use_llm_flavor": {
+    "description": "用大模型写一句赛后吐槽",
+    "type": "bool",
+    "default": true,
+    "hint": "每条战报会多一次很小的 LLM 请求；关掉则使用固定文案。"
+  }
+}
