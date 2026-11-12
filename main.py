@@ -20,6 +20,17 @@ PLUGIN_DIR = Path(__file__).resolve().parent
 if str(PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(PLUGIN_DIR))
 
+# AstrBot 的「重载插件」只会重新导入 main.py，已经在 sys.modules 里的子模块
+# （bigfish_core / bigfish_net）不会重新执行，于是会出现「文件更新了但还在跑旧代码」。
+# 这里主动把它们踢出去，保证每次重载都读到磁盘上的最新版本。
+for _stale in [
+    _m
+    for _m in list(sys.modules)
+    if _m in ("bigfish_core", "bigfish_net")
+    or _m.startswith(("bigfish_core.", "bigfish_net."))
+]:
+    sys.modules.pop(_stale, None)
+
 from astrbot.api import AstrBotConfig, logger  # noqa: E402
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter  # noqa: E402
 from astrbot.api.star import Context, Star, register  # noqa: E402

@@ -29,6 +29,9 @@ jobs:
       - name: 插件指令链路（astrbot 替身）
         run: python tests/plugin_test.py
 
+      - name: 热重载回归
+        run: python tests/reload_test.py
+
       - name: 中继 + bot 端到端
         run: python tests/e2e_test.py
 
