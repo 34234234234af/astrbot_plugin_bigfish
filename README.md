@@ -1,5 +1,9 @@
 # astrbot_plugin_bigfish · 大鱼吃小鱼
 
+> 仓库：<https://github.com/34234234234af/astrbot_plugin_bigfish>
+>
+> 安装：把本仓库克隆/解压到 `AstrBot/data/plugins/astrbot_plugin_bigfish/` 即可。
+
 给 AstrBot 的实时小游戏：群里发一条指令就能开一个房间，**游戏跑在房主的浏览器里**，
 人多了就一起玩，没人陪的时候 bot 会自己打一局，然后私聊向你汇报战绩。
 
