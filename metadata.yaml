@@ -2,7 +2,7 @@ name: astrbot_plugin_bigfish
 display_name: 大鱼吃小鱼
 short_desc: 实时双人大鱼吃小鱼，bot 会进房陪玩，没人时自己玩并私聊汇报战绩
 desc: 群里发 /鱼 开房 生成实时房间链接，游戏模拟跑在房主浏览器里、服务器只做 WebSocket 中继；bot 以玩家身份进房对局，空闲时会自己打一局并通过私聊汇报输赢、吃鱼数和分数。
-version: v0.1.0
+version: v0.2.0
 author: G
 repo: ""
 astrbot_version: ">=4.5.0"

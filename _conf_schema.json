@@ -1,4 +1,59 @@
 {
+  "command_names": {
+    "description": "主指令名",
+    "type": "list",
+    "default": ["鱼"],
+    "hint": "可以填多个，例如 [\"鱼\", \"小鱼\", \"钓鱼\"]。内置的 鱼/fish/钓鱼/大鱼 永远可用，这里的词是额外加的。",
+    "obvious_hint": true
+  },
+  "sub_commands": {
+    "description": "子指令词（可自己改）",
+    "type": "object",
+    "hint": "同一个功能可以写多个同义词，用 | 分隔，例如「开黑|来一把」。留空则用默认词；默认词始终兼容。",
+    "items": {
+      "open": {
+        "description": "开房",
+        "type": "string",
+        "default": "开房",
+        "hint": "例：开黑|来一把|组团"
+      },
+      "join": {
+        "description": "加入",
+        "type": "string",
+        "default": "加入"
+      },
+      "status": {
+        "description": "状态",
+        "type": "string",
+        "default": "状态"
+      },
+      "close": {
+        "description": "关房",
+        "type": "string",
+        "default": "关房"
+      },
+      "selfplay": {
+        "description": "自己玩",
+        "type": "string",
+        "default": "自己玩"
+      },
+      "stats": {
+        "description": "战绩",
+        "type": "string",
+        "default": "战绩"
+      },
+      "board": {
+        "description": "排行",
+        "type": "string",
+        "default": "排行"
+      },
+      "help": {
+        "description": "帮助",
+        "type": "string",
+        "default": "帮助"
+      }
+    }
+  },
   "relay_host": {
     "description": "中继监听地址",
     "type": "string",
@@ -9,13 +64,14 @@
     "description": "中继端口",
     "type": "int",
     "default": 8317,
-    "hint": "需要在服务器/安全组放行这个端口（除非前面套了反向代理）。"
+    "hint": "需要在服务器/安全组放行这个端口（除非前面套了反向代理）。改完要重载插件。"
   },
   "public_base_url": {
     "description": "公网访问地址",
     "type": "string",
     "default": "",
-    "hint": "例如 https://fish.example.com。留空则自动用「服务器内网IP:端口」，群里的人可能打不开。"
+    "hint": "例如 https://fish.example.com。留空则自动用「服务器内网IP:端口」，群里的人可能打不开。",
+    "obvious_hint": true
   },
   "max_players": {
     "description": "每个房间最多几个真人",
@@ -53,6 +109,41 @@
     "slider": {"min": 0.1, "max": 1.0, "step": 0.05},
     "hint": "太高会把人虐哭，0.6~0.8 比较合适。"
   },
+  "comment_enabled": {
+    "description": "让 bot 按人格设定点评/吐槽",
+    "type": "bool",
+    "default": true,
+    "hint": "会调用一次大模型，用当前会话的默认人格。关掉则只发干巴巴的战报。"
+  },
+  "comment_on_selfplay": {
+    "description": "自己玩完也点评",
+    "type": "bool",
+    "default": true
+  },
+  "comment_on_match": {
+    "description": "群内对局结束后也点评",
+    "type": "bool",
+    "default": true
+  },
+  "persona_id": {
+    "description": "点评使用的人格",
+    "type": "string",
+    "default": "",
+    "_special": "select_persona",
+    "hint": "留空 = 跟随当前会话的默认人格。"
+  },
+  "comment_style": {
+    "description": "额外的点评风格要求",
+    "type": "text",
+    "default": "",
+    "hint": "会追加到人格设定后面。例如：毒舌一点，喜欢拿输家开涮；多用鱼的比喻。"
+  },
+  "comment_max_chars": {
+    "description": "点评字数上限",
+    "type": "int",
+    "default": 60,
+    "slider": {"min": 20, "max": 200, "step": 10}
+  },
   "idle_enabled": {
     "description": "空闲时让 bot 自己玩",
     "type": "bool",
@@ -89,11 +180,5 @@
     "type": "bool",
     "default": false,
     "hint": "关掉（默认）时会给自己安排一个随机 AI 对手，这样才有输赢可汇报。"
-  },
-  "use_llm_flavor": {
-    "description": "用大模型写一句赛后吐槽",
-    "type": "bool",
-    "default": true,
-    "hint": "每条战报会多一次很小的 LLM 请求；关掉则使用固定文案。"
   }
 }
