@@ -45,18 +45,79 @@
 
 1. 把整个 `astrbot_plugin_bigfish` 目录放到服务器的
    `AstrBot/data/plugins/astrbot_plugin_bigfish/`
+   （或者直接 `git clone https://github.com/34234234234af/astrbot_plugin_bigfish.git`）
 2. 在 AstrBot WebUI → 插件 里点「重载插件」，或直接重启 AstrBot
 3. 依赖 `aiohttp`（AstrBot 自带了；如果提示缺失就按 `requirements.txt` 装一次）
-4. 到 插件配置 里填 **公网访问地址**（见下）
+4. 到 插件配置 里配 **中继模式** 和 **公网访问地址**（见下一节）
 
-### 必须配的一项：公网地址
+---
 
-游戏页面由插件自己起的一个小 HTTP 服务提供（默认端口 `8317`）。三种做法任选：
+## 二·五、中继放哪：服务器 or 自己电脑
+
+`relay_mode` 有两个选项，先想清楚要哪种：
+
+| | `local`（默认） | `external` |
+|---|---|---|
+| 中继跑在 | AstrBot 所在服务器 | **你自己的电脑** |
+| 需要配什么 | 一个公网地址（域名反代 / 放行端口） | 电脑上跑 `relay_server.py` + 一条隧道 |
+| 电脑关机时 | 照常能玩 | **玩不了**（bot 自娱不受影响） |
+| VPS 流量 | 约 25 KB/s 每人（连打 1 小时约 178 MB） | 几乎为 0 |
+
+> **bot 自己玩（自娱）两种模式都不需要中继**：那是本地快进模拟 + QQ 私聊汇报，
+> 唯一要配的是 `report_umo`（或先私聊 bot 发一次 `/鱼`）。
+
+### 外部中继（把锅放在自己电脑上）
+
+家里/校园网通常**没有公网 IP**（CGNAT），端口映射做不了，所以必须用"出站隧道"。
+两种隧道任选：
+
+#### 方案 A：Cloudflare 临时隧道（不用注册，5 分钟见效）
+
+1. 电脑装 Python（3.10+），然后在插件目录里双击 **`安装依赖.bat`**（或 `pip install aiohttp`）
+2. 下载 [cloudflared](https://github.com/cloudflare/cloudflared/releases/latest)，
+   把 `cloudflared-windows-amd64.exe` 改名成 `cloudflared.exe`，放到**插件目录**里
+3. 双击 **`中继-启动并穿隧道.bat`**
+4. 窗口里会出现一行 `https://xxxx-xxxx.trycloudflare.com`，**复制它**
+5. 到 AstrBot WebUI → 插件 → 配置：
+   - `中继跑在哪里` = `外部中继（我自己的电脑）`
+   - `公网访问地址` = 刚才那串 `https://...`
+   - 保存 → 重载插件
+6. 群里发 `/鱼 开房`，点链接就能玩
+
+> 临时隧道的地址**每次重开都会变**，变了就要重新粘一次到配置里。
+> 想彻底固定的话用方案 B。
+
+#### 方案 B：Tailscale Funnel（地址固定，一次配好）
+
+1. 注册 [Tailscale](https://tailscale.com)（免费）
+2. 电脑装 Tailscale 客户端并登录
+3. 在 [管理后台](https://login.tailscale.com/admin/dns) 打开 HTTPS 和 MagicDNS
+4. 命令行执行一次（之后可写进计划任务）：
+   ```powershell
+   tailscale funnel --bg 8317
+   ```
+   它会打印一个固定地址，形如 `https://你的电脑名.你的tailnet.ts.net`
+5. 电脑上双击 `中继-启动.bat`（只开中继，不需要 cloudflared）
+6. 插件配置：`中继跑在哪里` = 外部中继，`公网访问地址` = 那个 `https://....ts.net`
+
+以后每次开机只要：启动 Tailscale + 双击 `中继-启动.bat`，地址永远不变。
+
+#### 关于校园网/家宽的一点说明
+
+| 办法 | 能省 VPS 带宽吗 | 说明 |
+|---|---|---|
+| 端口映射 | ✅ | 需要真·公网 IP，校园网基本没有 |
+| Cloudflare 隧道 | ✅ | 流量走 Cloudflare，**不经过你的 VPS** |
+| frp（VPS 做 frps） | ❌ | 流量仍然从 VPS 过一遍，只是把 CPU 挪走了，意义不大 |
+
+### 本地中继（默认，最省事）
+
+游戏页面由插件自己起的 HTTP 服务提供（默认 `8317` 端口）：
 
 | 做法 | 配置 | 说明 |
 |---|---|---|
-| 直接暴露端口 | `public_base_url` 留空，安全组放行 8317 | 生成的是 `http://服务器IP:8317`，能用但不加密 |
-| 域名 + 反向代理（推荐） | `public_base_url = https://fish.example.com` | 见下方 Nginx 示例，链接好看也安全 |
+| 直接暴露端口 | `public_base_url` 留空，安全组放行 8317 | 生成 `http://服务器IP:8317`，能用但不加密 |
+| 域名 + 反向代理（推荐） | `public_base_url = https://fish.example.com` | 见下方 Nginx 示例 |
 | 内网玩 | `public_base_url` 留空 | 同一局域网可用 |
 
 Nginx 反代示例（注意要转发 WebSocket 的 Upgrade 头）：
@@ -168,8 +229,9 @@ location / {
 
 | 配置 | 默认 | 说明 |
 |---|---|---|
+| `relay_mode` | `local` | `local`=中继跑服务器；`external`=中继跑你自己电脑（见第二·五节） |
 | `relay_host` / `relay_port` | `0.0.0.0` / `8317` | 中继监听地址和端口 |
-| `public_base_url` | 空 | 公网地址，强烈建议填 |
+| `public_base_url` | 空 | 公网地址；`external` 模式下**必须**填隧道地址 |
 | `max_players` | 2 | 每房间最多几个真人（bot 不占位） |
 | `match_seconds` | 90 | 单局时长 |
 | `room_ttl_minutes` | 180 | 空房间保留多久 |
@@ -206,6 +268,10 @@ astrbot_plugin_bigfish/
 │   └── botclient.py        # bot 以真人玩家身份进房
 ├── web/
 │   └── index.html          # 整个前端：模拟 + 渲染 + 输入（单文件，无外部依赖）
+├── relay_server.py         # 独立中继入口（在自己电脑上跑，不需要 AstrBot）
+├── 中继-启动.bat            # Windows 双击启动中继
+├── 中继-启动并穿隧道.bat      # Windows 双击：中继 + cloudflared 临时隧道
+├── 安装依赖.bat            # Windows 双击：pip install aiohttp
 └── tests/                  # 本地测试，部署时可整目录删掉
     ├── _stub/astrbot/      # 测试用的 astrbot 替身包
     └── *.py / *.js
@@ -216,6 +282,11 @@ astrbot_plugin_bigfish/
 ---
 
 ## 七、常见问题
+
+**外部中继模式下开房，提示「我家电脑上的中继没开」**
+1. 电脑上那个中继窗口还开着吗（`中继-启动.bat`）
+2. 隧道变了吗：临时隧道（trycloudflare）**每次重开地址都会变**，要把新地址重新填到配置里
+3. 在浏览器打开你的公网地址 `/health`，能返回 `{"ok": true}` 才算通
 
 **链接打不开 / 一直显示正在连接**
 检查 `public_base_url`、防火墙/安全组、反代是否转发了 WebSocket（`Upgrade` 头）。

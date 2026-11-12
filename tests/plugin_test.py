@@ -169,12 +169,27 @@ async def main() -> int:
 
     # ---- 7. 关掉点评就不该调模型 ----
     plugin.conf["comment_on_match"] = False
+    result2 = {
+        "duration": 60.0,
+        "players": [
+            {"id": "h9", "name": "阿珍", "score": 411, "eaten": 12, "deaths": 1, "max_size": 44.0},
+            {"id": "b7", "name": "小鱼苗", "score": 199, "eaten": 6, "deaths": 3, "max_size": 30.0},
+        ],
+        "winner": "h9",
+    }
+    before = len(ctx.sent)
     before_calls = len(ctx.llm_calls)
-    await plugin._on_room_end(code, result)
+    await plugin._on_room_end(code, result2)
+    assert len(ctx.sent) == before + 1, "关掉点评后仍然应该播报结算"
     assert len(ctx.llm_calls) == before_calls, "关掉点评后不该再调用大模型"
     assert ctx.llm_reply not in ctx.sent[-1][1], "关掉点评后不该出现点评内容"
     plugin.conf["comment_on_match"] = True
-    print("[ok] 点评开关生效")
+
+    # 同一次结算重复回调（本地 relay 和 bot 客户端都会触发）只能播报一次
+    before = len(ctx.sent)
+    await plugin._on_room_end(code, result2)
+    assert len(ctx.sent) == before, "重复的结算回调应该被去重"
+    print("[ok] 点评开关 + 结算去重都生效")
 
     # ---- 8. 战绩 / 排行 ----
     st = await run_cmd(plugin, "鱼 战绩")

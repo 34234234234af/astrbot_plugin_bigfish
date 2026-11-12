@@ -26,12 +26,16 @@ class BotPlayer:
         room: str,
         name: str,
         skill: float = 0.7,
+        max_players: int = 0,
+        on_end: Callable[[dict], Awaitable[None]] | None = None,
         on_close: Callable[[str], Awaitable[None]] | None = None,
     ):
         self.base = relay_url.rstrip("/")
         self.room = room
         self.name = name
         self.skill = max(0.0, min(1.0, float(skill)))
+        self.max_players = int(max_players or 0)
+        self.on_end = on_end
         self.on_close = on_close
         self.pid: str = ""
         self.role: str = "bot"
@@ -46,9 +50,10 @@ class BotPlayer:
     # ------------------------------------------------------------------
     @property
     def url(self) -> str:
+        max_q = f"&max={self.max_players}" if self.max_players else ""
         return (
             f"{self.base}/ws?room={quote(self.room, safe='')}"
-            f"&name={quote(self.name, safe='')}&role=bot"
+            f"&name={quote(self.name, safe='')}&role=bot{max_q}"
         )
 
     def start(self) -> asyncio.Task:
@@ -145,6 +150,12 @@ class BotPlayer:
 
         elif t == "end":
             self.playing = False
+            result = data.get("result") or {}
+            if self.on_end and result:
+                try:
+                    await self.on_end(result)
+                except Exception as e:
+                    logger.error(f"[bigfish] bot on_end 回调出错: {e}")
 
         elif t in ("room_closed", "host_left"):
             self._stop = True

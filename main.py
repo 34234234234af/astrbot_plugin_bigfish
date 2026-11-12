@@ -24,6 +24,11 @@ from astrbot.api import AstrBotConfig, logger  # noqa: E402
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter  # noqa: E402
 from astrbot.api.star import Context, Star, register  # noqa: E402
 
+try:
+    import aiohttp
+except Exception:  # pragma: no cover
+    aiohttp = None
+
 from bigfish_core.engine import Sim  # noqa: E402
 from bigfish_core.report import format_report, format_room_result  # noqa: E402
 from bigfish_core.store import Store  # noqa: E402
@@ -114,6 +119,7 @@ class BigFishPlugin(Star):
         self.bots: dict[str, BotPlayer] = {}
         self._tasks: list[asyncio.Task] = []
         self._booted = False
+        self._reported: dict[str, float] = {}
         self._try_boot()
 
     # ============================================================ 基础
@@ -148,6 +154,18 @@ class BigFishPlugin(Star):
 
     async def _boot(self) -> None:
         try:
+            if self._external():
+                self._tasks.append(asyncio.create_task(self._idle_loop()))
+                alive = await self._remote_alive()
+                if alive:
+                    logger.info(f"[bigfish] 外部中继在线：{self._external_base()}")
+                else:
+                    logger.warning(
+                        "[bigfish] 外部中继连不上，房间类指令会提示；自娱功能不受影响。"
+                        f"（地址：{self._external_base() or '未配置'}）"
+                    )
+                return
+
             ok = await self.relay.start()
             if ok:
                 self._tasks.append(asyncio.create_task(self._idle_loop()))
@@ -158,7 +176,45 @@ class BigFishPlugin(Star):
         except Exception as e:
             logger.error(f"[bigfish] 启动失败: {e}")
 
+    # ------------------------------------------------- 外部中继
+    def _external(self) -> bool:
+        return str(self.c("relay_mode", "local")).lower() in ("external", "remote", "外部")
+
+    def _external_base(self) -> str:
+        return str(self.c("public_base_url", "") or "").strip().rstrip("/")
+
+    async def _remote_alive(self) -> bool:
+        base = self._external_base()
+        if not base or aiohttp is None:
+            return False
+        try:
+            timeout = aiohttp.ClientTimeout(total=6)
+            async with aiohttp.ClientSession(timeout=timeout) as s:
+                async with s.get(f"{base}/health") as r:
+                    if r.status != 200:
+                        return False
+                    data = await r.json(content_type=None)
+                    return bool(data.get("ok"))
+        except Exception:
+            return False
+
+    async def _remote_room_info(self, code: str) -> dict | None:
+        base = self._external_base()
+        if not base or aiohttp is None:
+            return None
+        try:
+            timeout = aiohttp.ClientTimeout(total=6)
+            async with aiohttp.ClientSession(timeout=timeout) as s:
+                async with s.get(f"{base}/api/room", params={"code": code}) as r:
+                    if r.status != 200:
+                        return None
+                    return await r.json(content_type=None)
+        except Exception:
+            return None
+
     async def _ensure_relay(self) -> bool:
+        if self._external():
+            return await self._remote_alive()
         if self.relay.running:
             return True
         self._try_boot()
@@ -233,6 +289,10 @@ class BigFishPlugin(Star):
             if word in self.sub_words(key):
                 return key
         return ""
+
+    def _usage(self, key: str) -> str:
+        """给提示文案用，例如 `/鱼 开房`（跟随用户配置的词）。"""
+        return f"/{self.command_names()[0]} {self.sub_words(key)[0]}"
 
     def help_text(self) -> str:
         cmd = self.command_names()[0]
@@ -330,6 +390,8 @@ class BigFishPlugin(Star):
         base = str(self.c("public_base_url", "") or "").strip().rstrip("/")
         if base:
             return base
+        if self._external():
+            return ""  # 外部中继必须显式配置地址
         return f"http://{_guess_lan_ip()}:{self.relay.port}"
 
     def _room_link(self, code: str) -> str:
@@ -343,6 +405,18 @@ class BigFishPlugin(Star):
 
     async def _cmd_open(self, event: AstrMessageEvent) -> str:
         if not await self._ensure_relay():
+            if self._external():
+                base = self._external_base()
+                if not base:
+                    return (
+                        "现在是「外部中继」模式，但没填地址。\n"
+                        "请到插件配置里把「公网访问地址」填成你家电脑那个链接"
+                        "（比如 https://xxx.trycloudflare.com），或者把中继模式改回 local。"
+                    )
+                return (
+                    "我家电脑上的中继没开，玩不了 🐟\n"
+                    f"（现在连的是 {base}，检查那个窗口还开着没有、隧道地址有没有变）"
+                )
             return (
                 "中继服务没起来（端口可能被占用）。\n"
                 f"请检查配置里的 relay_port（现在是 {self.relay.port}），或在服务器上放行该端口。"
@@ -351,69 +425,123 @@ class BigFishPlugin(Star):
         umo = event.unified_msg_origin
         exist = self._find_room_of(umo)
         if exist:
-            return f"这个会话已经有一个房间了：\n{self._room_link(exist)}\n要重开先发 /鱼 关房。"
+            # 外部模式下房间可能已经被远端回收了，先确认一下再决定
+            if self._external() and not await self._remote_room_info(exist):
+                self.rooms.pop(exist, None)
+                self.store.drop_room(exist)
+                await self._stop_bot(exist)
+            else:
+                return (
+                    f"这个会话已经有一个房间了：\n{self._room_link(exist)}\n"
+                    f"要重开先发 /{self.command_names()[0]} {self.sub_words('close')[0]}。"
+                )
 
         code = gen_code()
-        try:
-            self.relay.create_room(
-                code,
-                meta={"umo": umo, "creator": event.get_sender_id()},
-                max_players=int(self.c("max_players", 2)),
-            )
-        except Exception as e:
-            logger.error(f"[bigfish] 建房失败: {e}")
-            return f"建房失败：{e}"
+        max_players = int(self.c("max_players", 2))
 
-        self.rooms[code] = {
-            "umo": umo,
-            "creator": str(event.get_sender_id()),
-            "creator_name": event.get_sender_name(),
-            "ts": time.time(),
-        }
-        self.store.add_room(code, {"umo": umo, "ts": time.time()})
-
-        if bool(self.c("bot_plays", True)):
+        if self._external():
+            # 外部中继：房间由 bot 连上去的那一刻自动创建，这里只做登记
+            self.rooms[code] = {
+                "umo": umo,
+                "creator": str(event.get_sender_id()),
+                "creator_name": event.get_sender_name(),
+                "ts": time.time(),
+            }
             await self._spawn_bot(code)
+            # 等远端把房间建出来，确认一下才回链接
+            created = False
+            for _ in range(15):
+                if await self._remote_room_info(code):
+                    created = True
+                    break
+                await asyncio.sleep(0.2)
+            if not created:
+                self.rooms.pop(code, None)
+                await self._stop_bot(code)
+                return (
+                    "bot 连不上中继，房间没建成。\n"
+                    "看一眼前面那个中继窗口有没有报错，或者隧道地址是不是变了。"
+                )
+        else:
+            try:
+                self.relay.create_room(
+                    code,
+                    meta={"umo": umo, "creator": event.get_sender_id()},
+                    max_players=max_players,
+                )
+            except Exception as e:
+                logger.error(f"[bigfish] 建房失败: {e}")
+                return f"建房失败：{e}"
+
+            self.rooms[code] = {
+                "umo": umo,
+                "creator": str(event.get_sender_id()),
+                "creator_name": event.get_sender_name(),
+                "ts": time.time(),
+            }
+            if bool(self.c("bot_plays", True)):
+                await self._spawn_bot(code)
+
+        self.store.add_room(code, {"umo": umo, "ts": time.time()})
 
         bot_line = (
             f"\nbot「{self.c('bot_name', '小鱼苗')}」已经在房间里等着了。"
             if code in self.bots
             else ""
         )
+        where = "我家电脑" if self._external() else "服务器"
         return (
             f"🐟 房间开好了 · 房号 {code}\n"
             f"{self._room_link(code)}\n"
             f"规则：第一个打开链接的人当房主，游戏在这个房主的浏览器里运行，"
-            f"服务器只做转发，所以不卡也不吃我 CPU。\n"
+            f"{where}只做转发，所以不卡。\n"
             f"房主点「开始游戏」开局，一局 {int(self.c('match_seconds', 90))} 秒。{bot_line}"
         )
 
     def _cmd_join(self, event: AstrMessageEvent) -> str:
         code = self._find_room_of(event.unified_msg_origin)
         if not code:
-            return "这个会话还没有房间，先发 /鱼 开房。"
+            return f"这个会话还没有房间，先发 {self._usage('open')}。"
         return f"房间 {code}：\n{self._room_link(code)}"
 
     async def _cmd_status(self, event: AstrMessageEvent) -> str:
         code = self._find_room_of(event.unified_msg_origin)
         if not code:
-            return "这个会话还没有房间，先发 /鱼 开房。"
-        room = self.relay.get_room(code)
-        if not room:
-            self.rooms.pop(code, None)
-            return "房间已经失效了，重新发 /鱼 开房 吧。"
-        roster = room.roster()
+            return f"这个会话还没有房间，先发 {self._usage('open')}。"
+
+        if self._external():
+            info = await self._remote_room_info(code)
+            if not info:
+                self.rooms.pop(code, None)
+                return f"房间已经不在了（可能中继重启过），重新发 {self._usage('open')} 吧。"
+            roster = info.get("roster") or []
+            state = "对局进行中" if info.get("started") else "等待开始"
+        else:
+            room = self.relay.get_room(code)
+            if not room:
+                self.rooms.pop(code, None)
+                return f"房间已经失效了，重新发 {self._usage('open')} 吧。"
+            roster = room.roster()
+            state = "对局进行中" if room.started else "等待开始"
+
         names = "、".join(
             f"{r['name']}({'房主' if r['role'] == 'host' else ('bot' if r['role'] == 'bot' else '玩家')})"
             for r in roster
         ) or "还没有人进来"
-        state = "对局进行中" if room.started else "等待开始"
         return f"房间 {code} · {state}\n在线：{names}\n{self._room_link(code)}"
 
     async def _cmd_close(self, event: AstrMessageEvent) -> str:
         code = self._find_room_of(event.unified_msg_origin)
         if not code:
             return "这个会话当前没有房间。"
+
+        if self._external():
+            # 远端房间没法直接关，让 bot 退出即可；没人之后中继会在半分钟内回收
+            await self._stop_bot(code)
+            self.rooms.pop(code, None)
+            self.store.drop_room(code)
+            return f"房间 {code} 已收工（bot 退出了，房间会在半分钟内自动回收）。"
+
         await self.relay.close_room(code, "房主解散了房间")
         await self._stop_bot(code)
         self.rooms.pop(code, None)
@@ -424,14 +552,26 @@ class BigFishPlugin(Star):
         await self._stop_bot(code)
         name = str(self.c("bot_name", "小鱼苗") or "小鱼苗")
         skill = float(self.c("bot_skill", 0.75) or 0.75)
-        bind = self.relay.bind_host
-        if bind in ("0.0.0.0", "::", "", None):
-            bind = "127.0.0.1"
+        max_players = int(self.c("max_players", 2))
+
+        if self._external():
+            base = self._external_base()
+            if not base:
+                logger.error("[bigfish] 外部中继模式但没配 public_base_url")
+                return
+        else:
+            bind = self.relay.bind_host
+            if bind in ("0.0.0.0", "::", "", None):
+                bind = "127.0.0.1"
+            base = f"http://{bind}:{self.relay.port}"
+
         player = BotPlayer(
-            f"http://{bind}:{self.relay.port}",
+            base,
             code,
             name,
             skill,
+            max_players=max_players,
+            on_end=lambda result: self._on_room_end(code, result),
         )
         self.bots[code] = player
         player.start()
@@ -445,12 +585,28 @@ class BigFishPlugin(Star):
                 pass
 
     async def _on_room_end(self, code: str, result: dict) -> None:
-        """房主浏览器结算完成 → 群里播报 + 记入排行榜。"""
-        info = self.rooms.get(code) or {}
-        umo = info.get("umo") or ""
+        """房主浏览器结算完成 → 群里播报 + 记入排行榜。
+
+        本地模式下 relay 会回调一次，外部模式下 bot 客户端会收到 end 消息，
+        两条路都可能触发，所以这里按「房间+胜负+总分」去重。
+        """
+        if not result:
+            return
         rows = result.get("players") or []
         if not rows:
             return
+
+        sig = f"{code}:{result.get('winner')}:{sum(int(p.get('score', 0)) for p in rows)}"
+        now = time.time()
+        if now - self._reported.get(sig, 0.0) < 20:
+            return
+        self._reported[sig] = now
+        if len(self._reported) > 200:
+            cutoff = now - 600
+            self._reported = {k: v for k, v in self._reported.items() if v >= cutoff}
+
+        info = self.rooms.get(code) or {}
+        umo = info.get("umo") or ""
         try:
             self.store.record_board(rows, result.get("winner") or "")
         except Exception:
@@ -697,7 +853,7 @@ class BigFishPlugin(Star):
     def _cmd_board(self) -> str:
         items = self.store.top_board(10)
         if not items:
-            return "还没有人玩过，发 /鱼 开房 拉人开局。"
+            return f"还没有人玩过，发 {self._usage('open')} 拉人开局。"
         lines = ["🐟 群内排行榜"]
         for i, (name, d) in enumerate(items, 1):
             lines.append(

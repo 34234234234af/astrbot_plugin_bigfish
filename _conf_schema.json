@@ -54,6 +54,16 @@
       }
     }
   },
+  "relay_mode": {
+    "description": "中继跑在哪里",
+    "type": "string",
+    "default": "local",
+    "options": ["local", "external"],
+    "labels": ["插件自建（AstrBot 所在服务器）", "外部中继（我自己的电脑）"],
+    "subtitles": ["最省事，什么都不用额外配", "电脑不开机就没人能玩；需填下面的公网地址"],
+    "hint": "选 external 后，在自己电脑上运行插件目录里的 relay_server.py（或双击 中继-启动并穿隧道.bat），再把隧道地址填到「公网访问地址」。",
+    "obvious_hint": true
+  },
   "relay_host": {
     "description": "中继监听地址",
     "type": "string",
@@ -70,7 +80,7 @@
     "description": "公网访问地址",
     "type": "string",
     "default": "",
-    "hint": "例如 https://fish.example.com。留空则自动用「服务器内网IP:端口」，群里的人可能打不开。",
+    "hint": "例如 https://fish.example.com。外部中继模式下必须填你电脑那条隧道地址，如 https://xxx.trycloudflare.com。",
     "obvious_hint": true
   },
   "max_players": {

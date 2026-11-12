@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 import string
 import time
@@ -19,7 +20,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from astrbot.api import logger
+try:  # 单独跑中继时（relay_server.py）没有 astrbot 环境
+    from astrbot.api import logger
+except Exception:  # pragma: no cover
+    logger = logging.getLogger("bigfish.relay")
 
 try:
     from aiohttp import WSMsgType, web
@@ -81,10 +85,12 @@ class Relay:
         host: str = "0.0.0.0",
         port: int = 8317,
         web_dir: Path | None = None,
+        auto_create: bool = True,
     ):
         self.bind_host = host
         self.port = int(port)
         self.web_dir = Path(web_dir) if web_dir else None
+        self.auto_create = auto_create
         self.rooms: dict[str, Room] = {}
         self.on_end: Callable[[str, dict], Awaitable[None]] | None = None
         self.on_event: Callable[[str, str, dict], Awaitable[None]] | None = None
@@ -109,6 +115,7 @@ class Relay:
         self._app.router.add_get("/", self._handle_index)
         self._app.router.add_get("/index.html", self._handle_index)
         self._app.router.add_get("/health", self._handle_health)
+        self._app.router.add_get("/api/room", self._handle_api_room)
         self._app.router.add_get("/ws", self._handle_ws)
         self._app.router.add_get("/favicon.ico", self._handle_favicon)
         try:
@@ -196,7 +203,28 @@ class Relay:
 
     async def _handle_health(self, request):
         return web.json_response(
-            {"ok": True, "rooms": len(self.rooms), "uptime": time.time()}
+            {
+                "ok": True,
+                "rooms": len(self.rooms),
+                "uptime": time.time(),
+                "auto_create": self.auto_create,
+            }
+        )
+
+    async def _handle_api_room(self, request):
+        """给 AstrBot 插件查房间明细用（外部中继模式下插件看不到内存里的房间）。"""
+        code = (request.query.get("code") or "").upper()
+        room = self.rooms.get(code)
+        if not room:
+            return web.json_response({"ok": False, "error": "not_found"}, status=404)
+        return web.json_response(
+            {
+                "ok": True,
+                "code": room.code,
+                "roster": room.roster(),
+                "started": room.started,
+                "max_players": room.max_players,
+            }
         )
 
     # ------------------------------------------------------------ WS
@@ -209,11 +237,20 @@ class Relay:
 
         room = self.rooms.get(code)
         if not room:
-            ws = web.WebSocketResponse(heartbeat=25)
-            await ws.prepare(request)
-            await self._send(ws, {"t": "error", "msg": "房间不存在或已关闭", "fatal": True})
-            await ws.close()
-            return ws
+            if self.auto_create and code:
+                # 外部中继：第一个连进来的人（通常是 bot）顺手把房间建出来
+                try:
+                    maxp = int(request.query.get("max") or 8)
+                except Exception:
+                    maxp = 8
+                room = self.create_room(code, max_players=max(1, min(16, maxp)))
+                logger.info(f"[bigfish] 自动创建房间 {room.code}（max_players={room.max_players}）")
+            else:
+                ws = web.WebSocketResponse(heartbeat=25)
+                await ws.prepare(request)
+                await self._send(ws, {"t": "error", "msg": "房间不存在或已关闭", "fatal": True})
+                await ws.close()
+                return ws
 
         ws = web.WebSocketResponse(heartbeat=25, max_msg_size=MAX_MSG)
         await ws.prepare(request)

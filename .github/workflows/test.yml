@@ -32,6 +32,9 @@ jobs:
       - name: 中继 + bot 端到端
         run: python tests/e2e_test.py
 
+      - name: 外部中继模式端到端
+        run: python tests/external_relay_test.py
+
       - name: 前端规则引擎
         run: node tests/js_world_test.js
 
